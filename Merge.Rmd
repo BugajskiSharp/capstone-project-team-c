@@ -111,10 +111,10 @@ marathons_all <- bind_rows(
 str(marathons_all)
 ```
 
-Select only years we need (1996 to 2019)
+Select only years we need (1996 to 2025)
 ```{r}
 marathons_all <- marathons_all %>%
-  filter(year >= 1996 & year <= 2019)
+  filter(year >= 1996 & year <= 2025)
 
 str(marathons_all)
 ```
@@ -274,7 +274,7 @@ final_data <- avg_times %>%
   left_join(weather_clean, by = c("year", "marathon")) %>%
   left_join(airquality_clean, by = c("year", "marathon"))
 
-# move n (number of indivuduals represting each group) to the first column for neatness
+# move n (number of individuals representing each group) to the first column for neatness
 final_data <- final_data %>% 
   select(n, everything())
 
