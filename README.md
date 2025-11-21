@@ -29,6 +29,14 @@ Can weather and environmental factors—such as temperature, wind speed, precipi
 - `reports`: contains all reports 
 - `capstone-project-team-c.Rproj`: The RStudio Project file. Opening this file sets the project root
 - `README.md`: project overview 
+- `required
+
+## How to Run
+1. Clone the repository
+2. Open the project - Open capstone-project-team-c.Rproj in RStudio (sets the project root).
+3. Install any required packages (once per machine)
+4. Load libraries in notebooks
+5. Load data using project-relative paths (e.g. final_data <- read.csv(here("data", "merged_marathon_data.csv")))
 
 ## Team Members
 - Krisha Bugajski-Sharp
