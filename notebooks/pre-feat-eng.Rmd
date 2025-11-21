@@ -41,6 +41,10 @@ berlin_data <- final_data %>% filter(marathon == "Berlin")
 ```
 
 ```{r}
+str(main_data)
+```
+# Handling Missing Values
+```{r}
 # missing values
 missing_summary <- main_data %>%
   summarise(across(everything(), ~sum(is.na(.))))
@@ -62,68 +66,74 @@ main_data <- kNN(main_data, variable = "pm25", k = 5) # can change later to see 
 # Check that missing values are filled
 summary(main_data$pm25)
 ```
-# Getting data ready for Multiple Linear Regression model:
-Convert subgroup to ordered factor (for performance ranking) and other categorical variables to factors
+
+
+Convert categorical variables to factors
 ```{r}
-final_data <- final_data %>%
-  mutate(subgroup = factor(subgroup,
-                           levels = c("slow","recreational","average","competitive","elite"),
-                           ordered = TRUE),
+main_data  <- main_data  %>%
+  mutate(subgroup = factor(subgroup),
          gender = factor(gender),
          marathon = factor(marathon),
          main_pollutant = factor(main_pollutant))
 
-
 # look at structure
-str(final_data)
+str(main_data )
 ```
-
+# Feature engineering 
 
 ```{r}
-# create supershoes control
-final_data <- final_data %>%
+# create interaction terms and convert supershoe to factor
+main_data <- main_data %>%
   mutate(
-    supershoe_era = ifelse(year >= 2018, 1, 0)
+    pm25_imp  = factor(pm25_imp, levels = c(FALSE, TRUE)),
+    supershoe = factor(ifelse(year >= 2018, 1, 0), levels = c(0, 1)),
+    temp_dew_interaction       = avg_temp * dew_point,
+    temp_aqi_interaction       = avg_temp * aqi, # optional
+    temp_precip_interaction    = avg_temp * precipitation,
+    temp_wind_interaction      = avg_temp * wind_speed,
+    pm25_temp_interaction      = pm25 * avg_temp,
+    dew_wind_interaction       = dew_point * wind_speed,
+    pressure_temp_interaction  = sea_level_pressure * avg_temp,
+    avg_temp_gender_interaction = avg_temp * as.numeric(gender == "male")
   )
+
+str(main_data)
 ```
+
+# Need to do a Quick correlation check for numeric variables and see what features inroduce multicollinearity
+
+```{r}
+#CODE HERE, where I stoped
+```
+
+
 
 
 ```{r}
-# indicate and define year of covid
-final_data <- final_data %>%
-  mutate(
-    covid_era = ifelse(year == 2020, 1, 0)
-  )
+# Load package
+library(car)
+
+# Select numeric columns only (exclude factors like gender, subgroup, supershoe, pm25_imp)
+numeric_vars <- main_data %>%
+  select(where(is.numeric))
+
+# Fit a linear model with all numeric predictors
+vif_model <- lm(avg_chip_seconds ~ ., data = numeric_vars)
+
+# Compute VIFs
+vif_values <- vif(vif_model)
+
+# Sort and view
+vif_values_sorted <- sort(vif_values, decreasing = TRUE)
+vif_values_sorted
+
 ```
 
-```{r}
-# replacing the numeric variables with missing data with mean (could do median if we keep this); most likely dropping though
-numeric_vars <- final_data %>%
-  select(where(is.numeric)) %>%
-  names()
 
-final_data <- final_data %>%
-  mutate(across(all_of(numeric_vars), ~ifelse(is.na(.), mean(., na.rm = TRUE), .)))
-```
-
-```{r}
-# create custom cutoff times for performance groups
-final_data <- final_data %>%
-  mutate(
-    finish_hours = avg_chip_seconds / 3600, # think we are having all time in seconds, need fixing
-    subgroup2 = case_when(
-      finish_hours < 3 ~ "elite",
-      finish_hours < 3.75 ~ "competitive",
-      finish_hours < 4.75 ~ "average",
-      finish_hours < 5.75 ~ "recreational",
-      TRUE ~ "slow"
-    )
-  )
-```
-
+# Data Processing 
 ```{r}
 # scale numerics
-scale_vars <- final_data %>%
+scale_vars <- main_data %>%
   select(
     high_temp, low_temp, avg_temp, precipitation, dew_point,
     wind_speed, visibility, sea_level_pressure, aqi, pm10, pm25, no2, ozone, co
@@ -135,21 +145,7 @@ final_data_scaled <- final_data %>%
   mutate(across(all_of(scale_vars), scale))
 ```
 
-```{r}
-# create interaction terms
-final_data_scaled <- final_data_scaled %>%
-  mutate(
-    temp_dew_interaction       = avg_temp * dew_point,
-    temp_aqi_interaction       = avg_temp * aqi, # can remove
-    temp_precip_interaction    = avg_temp * precipitation,
-    temp_wind_interaction      = avg_temp * wind_speed,
-    pm25_temp_interaction      = pm25 * avg_temp,
-    dew_wind_interaction       = dew_point * wind_speed,
-    pressure_temp_interaction  = sea_level_pressure * avg_temp,
-    avg_temp_gender_interaction = avg_temp * as.numeric(gender == "male")
-  )
 
-```
 
 
 ```{r}
@@ -354,4 +350,37 @@ summary(final_data_scaled)
 ```
 
 
+------------------------
+IDEAS:
+
+# indicate and define year of covid
+final_data <- final_data %>%
+  mutate(
+    covid_era = ifelse(year == 2020, 1, 0)
+  )
+
+
+
+# replacing the numeric variables with missing data with mean (could do median if we keep this); most likely dropping though
+numeric_vars <- final_data %>%
+  select(where(is.numeric)) %>%
+  names()
+
+final_data <- final_data %>%
+  mutate(across(all_of(numeric_vars), ~ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+
+
+# create custom cutoff times for performance groups
+final_data <- final_data %>%
+  mutate(
+    finish_hours = avg_chip_seconds / 3600, # think we are having all time in seconds, need fixing
+    subgroup2 = case_when(
+      finish_hours < 3 ~ "elite",
+      finish_hours < 3.75 ~ "competitive",
+      finish_hours < 4.75 ~ "average",
+      finish_hours < 5.75 ~ "recreational",
+      TRUE ~ "slow"
+    )
+  )
 
