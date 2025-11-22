@@ -217,7 +217,7 @@ kable(summary_table, caption = "Table: Descriptive Statistics for Continuous Var
 ```
 
 ```{r}
-# Make pollutant data into log format for graphing
+# Make pollutant data into long format for graphing
 pollutant_long <- final_data %>%
   mutate(
     finish_hours = avg_chip_seconds / 3600   # convert seconds to hours
@@ -302,20 +302,20 @@ ggplot(final_data2, aes(x = year, y = avg_chip_seconds, color = marathon)) +
 ```
 
 
+Summary Tables and Box and whisker plots
 ```{r}
-#marathons_all<-read.csv(here("data","marathons_all.csv"))
-
 #Boston
-boston<- marathons_all %>% filter(marathon=="Boston")
+boston <- final_data %>% filter(marathon=="Boston")
+
 #Summarize
 summary_long <- boston %>%
   group_by(year, gender) %>%
   summarise(
     N=n(),
-    mean_time=mean(chip_seconds, na.rm = TRUE),
-    sd_time=sd(chip_seconds, na.rm = TRUE),
-    min_time=min(chip_seconds, na.rm = TRUE),
-    max_time=max(chip_seconds, na.rm = TRUE),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
     .groups="drop") %>%
   mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
     min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
@@ -346,16 +346,16 @@ summary_combined %>%
 
 
 #Berlin
-berlin<- marathons_all %>% filter(marathon=="Berlin")
+berlin<- final_data  %>% filter(marathon=="Berlin")
 #Summarize
 summary_long <- berlin %>%
   group_by(year, gender) %>%
   summarise(
     N=n(),
-    mean_time=mean(chip_seconds, na.rm = TRUE),
-    sd_time=sd(chip_seconds, na.rm = TRUE),
-    min_time=min(chip_seconds, na.rm = TRUE),
-    max_time=max(chip_seconds, na.rm = TRUE),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
     .groups="drop") %>%
   mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
     min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
@@ -385,16 +385,16 @@ summary_combined %>%
 
 
 #Chicago
-chicago<- marathons_all %>% filter(marathon=="Chicago")
+chicago<- final_data  %>% filter(marathon=="Chicago")
 #Summarize
 summary_long <- chicago %>%
   group_by(year, gender) %>%
   summarise(
     N=n(),
-    mean_time=mean(chip_seconds, na.rm = TRUE),
-    sd_time=sd(chip_seconds, na.rm = TRUE),
-    min_time=min(chip_seconds, na.rm = TRUE),
-    max_time=max(chip_seconds, na.rm = TRUE),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
     .groups="drop") %>%
   mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
     min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
@@ -423,16 +423,16 @@ summary_combined %>%
     table.font.size = px(14))
 
 #NYC
-NYC<- marathons_all %>% filter(marathon=="NYC")
+NYC<- final_data %>% filter(marathon=="NYC")
 #Summarize
 summary_long <- NYC %>%
   group_by(year, gender) %>%
   summarise(
     N=n(),
-    mean_time=mean(chip_seconds, na.rm = TRUE),
-    sd_time=sd(chip_seconds, na.rm = TRUE),
-    min_time=min(chip_seconds, na.rm = TRUE),
-    max_time=max(chip_seconds, na.rm = TRUE),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
     .groups="drop") %>%
   mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
     min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
@@ -465,15 +465,15 @@ summary_combined %>%
 
 
 #Boston
-boston<- marathons_all %>% filter(marathon=="Boston")
+boston<- final_data %>% filter(marathon=="Boston")
 summary_all <- boston %>%
   group_by(year) %>%
   summarise(
     N=n(),
-    mean_time=mean(chip_seconds, na.rm = TRUE),
-    sd_time=sd(chip_seconds, na.rm = TRUE),
-    min_time=min(chip_seconds, na.rm = TRUE),
-    max_time=max(chip_seconds, na.rm = TRUE),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
     .groups="drop") %>%
   mutate(
     combined=paste0(
@@ -491,15 +491,15 @@ summary_all %>%
 
 
 #Berlin
-berlin<- marathons_all %>% filter(marathon=="Berlin")
+berlin<- final_data %>% filter(marathon=="Berlin")
 summary_all <- berlin %>%
   group_by(year) %>%
   summarise(
     N=n(),
-    mean_time=mean(chip_seconds, na.rm = TRUE),
-    sd_time=sd(chip_seconds, na.rm = TRUE),
-    min_time=min(chip_seconds, na.rm = TRUE),
-    max_time=max(chip_seconds, na.rm = TRUE),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
     .groups="drop") %>%
   mutate(
     combined=paste0(
@@ -515,15 +515,15 @@ summary_all %>%
 
 
 #Chicago
-chicago<- marathons_all %>% filter(marathon=="Chicago")
+chicago<- final_data %>% filter(marathon=="Chicago")
 summary_all <- chicago %>%
   group_by(year) %>%
   summarise(
     N=n(),
-    mean_time=mean(chip_seconds, na.rm = TRUE),
-    sd_time=sd(chip_seconds, na.rm = TRUE),
-    min_time=min(chip_seconds, na.rm = TRUE),
-    max_time=max(chip_seconds, na.rm = TRUE),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
     .groups="drop") %>%
   mutate(
     combined=paste0(
@@ -538,15 +538,15 @@ summary_all %>%
   tab_options(data_row.padding = px(3),table.font.size = px(14))
 
 #NYC
-NYC<- marathons_all %>% filter(marathon=="NYC")
+NYC<- final_data %>% filter(marathon=="NYC")
 summary_all <- NYC %>%
   group_by(year) %>%
   summarise(
     N=n(),
-    mean_time=mean(chip_seconds, na.rm = TRUE),
-    sd_time=sd(chip_seconds, na.rm = TRUE),
-    min_time=min(chip_seconds, na.rm = TRUE),
-    max_time=max(chip_seconds, na.rm = TRUE),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
     .groups="drop") %>%
   mutate(
     combined=paste0(
@@ -565,14 +565,14 @@ summary_all %>%
 
 #BOX AND WHISKER
 #BOSTON
-ggplot(boston, aes(x = gender, y = chip_seconds/ 3600, fill = gender)) +
+ggplot(boston, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
   geom_boxplot(outlier.alpha = 0.3) +
   scale_y_continuous(name = "Chip Time") +
   labs(title = "Boston Marathon Chip Times by Gender") +
   theme_minimal() +
   theme(legend.position = "none")
 
-ggplot(boston, aes(x = "", y = chip_seconds / 3600)) +
+ggplot(boston, aes(x = "", y =avg_chip_seconds / 3600)) +
   geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
   scale_y_continuous(name = "Chip Time") +
   labs(title = "Boston Marathon Chip Times - All Runners") +
@@ -582,14 +582,14 @@ ggplot(boston, aes(x = "", y = chip_seconds / 3600)) +
         axis.ticks.x = element_blank())
 
 #BERLIN
-ggplot(berlin, aes(x = gender, y = chip_seconds/ 3600, fill = gender)) +
+ggplot(berlin, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
   geom_boxplot(outlier.alpha = 0.3) +
   scale_y_continuous(name = "Chip Time") +
   labs(title = "Berlin Marathon Chip Times by Gender") +
   theme_minimal() +
   theme(legend.position = "none")
 
-ggplot(berlin, aes(x = "", y = chip_seconds / 3600)) +
+ggplot(berlin, aes(x = "", y =avg_chip_seconds / 3600)) +
   geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
   scale_y_continuous(name = "Chip Time") +
   labs(title = "Berlin Marathon Chip Times - All Runners") +
@@ -599,14 +599,14 @@ ggplot(berlin, aes(x = "", y = chip_seconds / 3600)) +
         axis.ticks.x = element_blank())
 
 #CHICAGO
-ggplot(chicago, aes(x = gender, y = chip_seconds/ 3600, fill = gender)) +
+ggplot(chicago, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
   geom_boxplot(outlier.alpha = 0.3) +
   scale_y_continuous(name = "Chip Time") +
   labs(title = "Chicago Marathon Chip Times by Gender") +
   theme_minimal() +
   theme(legend.position = "none")
 
-ggplot(chicago, aes(x = "", y = chip_seconds / 3600)) +
+ggplot(chicago, aes(x = "", y =avg_chip_seconds / 3600)) +
   geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
   scale_y_continuous(name = "Chip Time") +
   labs(title = "Chicago Marathon Chip Times - All Runners") +
@@ -617,14 +617,14 @@ ggplot(chicago, aes(x = "", y = chip_seconds / 3600)) +
 
 
 #NYC
-ggplot(NYC, aes(x = gender, y = chip_seconds/ 3600, fill = gender)) +
+ggplot(NYC, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
   geom_boxplot(outlier.alpha = 0.3) +
   scale_y_continuous(name = "Chip Time") +
   labs(title = "NYC Marathon Chip Times by Gender") +
   theme_minimal() +
   theme(legend.position = "none")
 
-ggplot(NYC, aes(x = "", y = chip_seconds / 3600)) +
+ggplot(NYC, aes(x = "", y =avg_chip_seconds / 3600)) +
   geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
   scale_y_continuous(name = "Chip Time") +
   labs(title = "NYC Marathon Chip Times - All Runners") +
