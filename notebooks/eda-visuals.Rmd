@@ -1,0 +1,636 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-11-19"
+---
+
+libraries
+```{r}
+library(here)
+library(dplyr)
+library(psych)
+library(knitr)
+library(tidyr)
+library(ggplot2)
+library(corrplot)
+library(gt)
+```
+
+Importing data
+```{r}
+final_data = read.csv(here("data","merged_marathon_data.csv"))
+```
+
+Tables and Graphing: 
+```{r}
+# Table 1: Continuous Variable Summary
+# Select the continuous variables
+continuous_summary <- final_data %>%
+  select(avg_chip_seconds, high_temp, low_temp, avg_temp, precipitation,
+         dew_point, wind_speed, visibility, sea_level_pressure, aqi, pm10, pm25, no2, ozone, co) %>%
+  summarise_all(list(
+    mean = ~mean(., na.rm = TRUE),
+    median = ~median(., na.rm = TRUE),
+    sd = ~sd(., na.rm = TRUE),
+    min = ~min(., na.rm = TRUE),
+    max = ~max(., na.rm = TRUE)
+  ))
+continuous_summary
+```
+
+
+```{r}
+# Table 2: Continuous variables summarized by subgroup and gender
+# Select continuous variables
+continuous_summary_grouped <- final_data %>%
+  group_by(gender, subgroup) %>% # group by gender and subgroup
+  summarise(
+    avg_chip_seconds_mean = mean(avg_chip_seconds, na.rm = TRUE),
+    avg_chip_seconds_sd = sd(avg_chip_seconds, na.rm = TRUE),
+    high_temp_mean = mean(high_temp, na.rm = TRUE),
+    high_temp_sd = sd(high_temp, na.rm = TRUE),
+    low_temp_mean = mean(low_temp, na.rm = TRUE),
+    low_temp_sd = sd(low_temp, na.rm = TRUE),
+    avg_temp_mean = mean(avg_temp, na.rm = TRUE),
+    avg_temp_sd = sd(avg_temp, na.rm = TRUE),
+    precipitation_mean = mean(precipitation, na.rm = TRUE),
+    precipitation_sd = sd(precipitation, na.rm = TRUE),
+    dew_point_mean = mean(dew_point, na.rm = TRUE),
+    dew_point_sd = sd(dew_point, na.rm = TRUE),
+    wind_speed_mean = mean(wind_speed, na.rm = TRUE),
+    wind_speed_sd = sd(wind_speed, na.rm = TRUE),
+    visibility_mean = mean(visibility, na.rm = TRUE),
+    visibility_sd = sd(visibility, na.rm = TRUE),
+    sea_level_pressure_mean = mean(sea_level_pressure, na.rm = TRUE),
+    sea_level_pressure_sd = sd(sea_level_pressure, na.rm = TRUE),
+    aqi_mean = mean(aqi, na.rm = TRUE),
+    aqi_sd = sd(aqi, na.rm = TRUE),
+    pm10_mean = mean(pm10, na.rm = TRUE),
+    pm10_sd = sd(pm10, na.rm = TRUE),
+    pm25_mean = mean(pm25, na.rm = TRUE),
+    pm25_sd = sd(pm25, na.rm = TRUE),
+    no2_mean = mean(no2, na.rm = TRUE),
+    no2_sd = sd(no2, na.rm = TRUE),
+    ozone_mean = mean(ozone, na.rm = TRUE),
+    ozone_sd = sd(ozone, na.rm = TRUE),
+    co_mean = mean(co, na.rm = TRUE),
+    co_sd = sd(co, na.rm = TRUE)
+  ) %>%
+  arrange(gender, subgroup)
+continuous_summary_grouped
+```
+
+
+```{r}
+# Figure 1: Distribution of Average Finishing Times
+library(ggplot2) # load plotting library
+ggplot(final_data, aes(x = avg_chip_seconds / 3600)) + # convert from seconds to hours
+  geom_histogram(bins = 20, fill = "steelblue", color = "black") + # create a histogram
+  labs(title = "Distribution of Average Finishing Times", # generate labels
+    x = "Average Finishing Time (hours)",
+    y = "Frequency"
+  )
+```
+
+
+
+```{r}
+# Figure 2: Overview of the Effect of Avg Temperature on Finishing Time by Marathon
+ggplot(final_data, aes(x = avg_temp, y = avg_chip_seconds / 3600, color = marathon)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~ marathon, scales = "free_x") + # each marathon has own x-axis scale
+  labs(title = "Overview of the Effect of Average Temperature on Finishing Time by Marathon",
+    x = "Average Temperature (°F)",
+    y = "Finishing Time (hours)"
+  )
+```
+
+
+
+```{r}
+# Figure 3: Overview of the Relationship Between Air Quality and Finishing Time by Marathon
+ggplot(final_data, aes(x = aqi, y = avg_chip_seconds / 3600, color = marathon)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~ marathon, scales = "free_x") + 
+  labs(title = "Overview of the Relationship Between Air Quality and Finishing Time by Marathon",
+    x = "Air Quality Index (AQI)",
+    y = "Average Finishing Time (hours)"
+  ) +
+  theme(legend.position = "none")
+```
+
+
+
+```{r}
+# select only the numeric variables
+numeric_vars <- final_data %>%
+  select(avg_chip_seconds, avg_temp, precipitation, dew_point,
+         wind_speed, visibility, sea_level_pressure,
+         aqi, pm10, pm25, no2, ozone, co)
+
+# create correlation matrix
+cor_matrix <- cor(numeric_vars, use = "complete.obs")
+
+# round the correlations
+round(cor_matrix, 2)
+
+#Correlation Heat map
+corrplot(
+  cor_mat,
+  method="color",col=colorRampPalette(c("darkblue", "white", "red"))(200),
+  addCoef.col="black", tl.col="black", tl.srt=45             
+)
+
+```
+
+
+Table for continuous variables:
+```{r}
+# Select continuous variables
+continuous_vars <- final_data %>% 
+  select(
+    avg_chip_seconds,
+    high_temp,
+    low_temp,
+    avg_temp,
+    dew_point,
+    wind_speed,
+    visibility,
+    sea_level_pressure,
+    aqi,
+    co,
+    ozone,
+    pm10,
+    pm25,
+    no2
+  )
+
+
+str(continuous_vars)
+```
+
+
+```{r}
+continuous_only <- continuous_vars %>%
+  select(where(is.numeric))
+
+continuous_summary <- describe(continuous_only) %>%
+  as.data.frame() %>%
+  select(
+    mean,
+    sd,
+    median,
+    min,
+    max,
+    skew,
+    kurtosis,
+    n
+  )
+continuous_summary
+
+```
+
+
+```{r}
+summary_table <- tribble(
+  ~variable, ~mean, ~sd, ~median, ~min, ~max, ~skew, ~kurtosis, ~n,
+  "avg_chip_seconds", 15631.620549, 2938.8848538, 15284.20, 10304.77, 23679.03, 0.50530121, -0.3896989, 1005,
+  "high_temp",        61.621891,   10.4803135, 61.00, 44.00, 88.00, 0.57757331, -0.3573111, 1005,
+  "low_temp",         46.009950,    7.9703072, 45.00, 28.00, 72.00, 0.77231953,  1.0186755, 1005,
+  "avg_temp",         53.718209,    8.6975811, 52.88, 29.58, 79.35, 0.42260873,  0.3116392, 1005,
+  "dew_point",        41.023831,   10.7187978, 42.40, 21.13, 65.22, -0.08246867, -0.9095537, 1005,
+  "wind_speed",       13.119403,    6.7699588, 13.00,  3.00, 39.00, 0.78517635,  1.0872273, 1005,
+  "visibility",        9.848072,    1.4872173, 10.00,  6.06, 20.00, 2.79083334, 25.7005389, 830,
+  "sea_level_pressure", 29.925970, 0.3391476, 29.98, 29.13, 30.54, -0.41101449, -0.7527869, 1005,
+  "aqi",              50.572139,   21.7623899, 52.00, 11.00, 119.00, 0.32111228, 0.2198760, 1005,
+  "co",               13.948052,   11.7791733,  9.00,  2.00,  56.00, 1.58769285, 2.1592651, 770,
+  "ozone",            36.179104,   18.0530913, 34.00,  7.00, 100.00, 1.22285653, 2.3430336, 1005,
+  "pm10",             23.576000,   13.0305755, 21.00,  5.00,  69.00, 0.89184403, 0.8083714, 625,
+  "pm25",             57.510345,   16.7892845, 53.00, 21.00, 119.00, 0.85098957, 1.3911927, 725,
+  "no2",              31.915423,   14.9253725, 32.00,  7.00,  66.00, 0.15839726, -0.7783209, 1005
+)
+
+kable(summary_table, caption = "Table: Descriptive Statistics for Continuous Variables", digits = 2)
+
+```
+
+```{r}
+# Make pollutant data into long format for graphing
+pollutant_long <- final_data %>%
+  mutate(
+    finish_hours = avg_chip_seconds / 3600   # convert seconds to hours
+  ) %>%
+  pivot_longer(
+    cols = c(co, pm25, pm10, aqi),
+    names_to = "pollutant",
+    values_to = "value"
+  )
+
+# plotting scatter plots
+ggplot(pollutant_long, 
+       aes(x = value, y = finish_hours, color = pollutant)) +
+  geom_point(alpha = 0.25) +
+  geom_smooth(se = FALSE, method = "loess") +
+  facet_wrap(~ subgroup, scales = "free") +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = "Pollution vs. Finish Times by Performance Subgroup",
+    x = "Pollutant Level (AQI)",
+    y = "Average Finishing Time (hours)",
+    color = "Pollutant"
+  ) +
+  theme_minimal(base_size = 14)
+
+```
+
+
+```{r}
+# Scatter plots by marathon and subgroup
+ggplot(final_data, aes(x = year, y = avg_chip_seconds)) +
+  geom_point(aes(color = subgroup), alpha = 0.7, size = 2) +  # points colored by subgroup
+  geom_smooth(aes(color = subgroup), method = "loess", se = FALSE) + # optional trend lines
+  facet_wrap(~ marathon) +  # one plot per marathon
+  labs(
+    title = "Average Marathon Finishing Times by Year and Subgroup",
+    x = "Year",
+    y = "Average Finishing Time (seconds)",
+    color = "Performance Subgroup"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+```
+
+```{r}
+#Add 'Overall' graph, making df 'final_data2' for purpose of figure 5 and  6
+final_data2 <- final_data %>% mutate(subgroup = tolower(as.character(subgroup))) %>% bind_rows(final_data %>% 
+mutate(subgroup = "overall")) %>%
+  mutate(subgroup = factor(subgroup,levels = c("elite", "competitive", "average", "recreational", "slow", "overall")))
+final_data2$year <- as.numeric(as.character(final_data2$year))
+
+#Figure 5: Visibility and Finishing time
+ggplot(final_data2, aes(x = visibility, y = avg_chip_seconds / 3600, color = marathon)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(aes(linetype=gender),method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~ subgroup, scales = "free_x") + 
+  labs(title = "Overview of the Relationship Between Visibility and Finishing Time by Performance Subgroup",
+       x = "Visibility (mi)",
+       y = "Average Finishing Time (hours)"
+  ) +
+  theme(legend.position = "right")
+```
+
+```{r}
+#Figure 6: Average Finishing Time by Year, Subgroup, Gender (Supershoes)
+ggplot(final_data2, aes(x = year, y = avg_chip_seconds, color = marathon)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(aes(linetype=gender),method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~ subgroup, scales = "free_x") + 
+  geom_vline(xintercept = 2018, linetype = "dashed", color = "red", linewidth = 1) +  # vertical line
+  labs(title = "Average Finishing Time Over the Years",
+       x = "Year",
+       y = "Average Finishing Time (hours)"
+  ) +
+  theme(legend.position = "right")
+
+
+```
+
+
+Summary Tables and Box and whisker plots
+```{r}
+#Boston
+boston <- final_data %>% filter(marathon=="Boston")
+
+#Summarize
+summary_long <- boston %>%
+  group_by(year, gender) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
+    min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
+
+#Pivot wider — ensure one row per year
+summary_wide <- summary_long %>%
+  pivot_wider(id_cols=year,                   
+    names_from=gender,
+    values_from=c(N, mean_sd, min_max),
+    names_glue="{gender}_{.value}") %>% arrange(year)
+
+#Combine into one column per gender for GT
+summary_combined <- summary_wide %>%
+  mutate(Female=paste0("N = ", female_N, "<br>", female_mean_sd, "<br>", female_min_max),
+         Male=paste0("N = ", male_N, "<br>", male_mean_sd, "<br>", male_min_max)) %>%
+  select(year, Female, Male)
+
+#GT table
+summary_combined %>%
+  gt(rowname_col = "year") %>%
+  cols_label(Female = "Female",
+             Male   = "Male") %>%
+  fmt_markdown(columns = c(Female, Male)) %>%
+  tab_options(
+    data_row.padding = px(3),
+    table.font.size = px(14))
+
+
+
+#Berlin
+berlin<- final_data  %>% filter(marathon=="Berlin")
+#Summarize
+summary_long <- berlin %>%
+  group_by(year, gender) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
+    min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
+
+#Pivot wider — ensure one row per year
+summary_wide <- summary_long %>%
+  pivot_wider(id_cols=year,                   
+    names_from=gender,
+    values_from=c(N, mean_sd, min_max),
+    names_glue="{gender}_{.value}") %>% arrange(year)
+
+#Combine into one column per gender for GT
+summary_combined <- summary_wide %>%
+  mutate(Female=paste0("N = ", female_N, "<br>", female_mean_sd, "<br>", female_min_max),
+         Male=paste0("N = ", male_N, "<br>", male_mean_sd, "<br>", male_min_max)) %>%
+  select(year, Female, Male)
+
+#GT table
+summary_combined %>%
+  gt(rowname_col = "year") %>%
+  cols_label(Female = "Female",
+             Male   = "Male") %>%
+  fmt_markdown(columns = c(Female, Male)) %>%
+  tab_options(
+    data_row.padding = px(3),
+    table.font.size = px(14))
+
+
+#Chicago
+chicago<- final_data  %>% filter(marathon=="Chicago")
+#Summarize
+summary_long <- chicago %>%
+  group_by(year, gender) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
+    min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
+
+#Pivot wider — ensure one row per year
+summary_wide <- summary_long %>%
+  pivot_wider(id_cols=year,                   
+    names_from=gender,
+    values_from=c(N, mean_sd, min_max),
+    names_glue="{gender}_{.value}") %>% arrange(year)
+
+#Combine into one column per gender for GT
+summary_combined <- summary_wide %>%
+  mutate(Female=paste0("N = ", female_N, "<br>", female_mean_sd, "<br>", female_min_max),
+         Male=paste0("N = ", male_N, "<br>", male_mean_sd, "<br>", male_min_max)) %>%
+  select(year, Female, Male)
+
+#GT table
+summary_combined %>%
+  gt(rowname_col = "year") %>%
+  cols_label(Female = "Female",
+             Male   = "Male") %>%
+  fmt_markdown(columns = c(Female, Male)) %>%
+  tab_options(
+    data_row.padding = px(3),
+    table.font.size = px(14))
+
+#NYC
+NYC<- final_data %>% filter(marathon=="NYC")
+#Summarize
+summary_long <- NYC %>%
+  group_by(year, gender) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
+    min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
+
+#Pivot wider — ensure one row per year
+summary_wide <- summary_long %>%
+  pivot_wider(id_cols=year,                   
+    names_from=gender,
+    values_from=c(N, mean_sd, min_max),
+    names_glue="{gender}_{.value}") %>% arrange(year)
+
+#Combine into one column per gender for GT
+summary_combined <- summary_wide %>%
+  mutate(Female=paste0("N = ", female_N, "<br>", female_mean_sd, "<br>", female_min_max),
+         Male=paste0("N = ", male_N, "<br>", male_mean_sd, "<br>", male_min_max)) %>%
+  select(year, Female, Male)
+
+#GT table
+summary_combined %>%
+  gt(rowname_col = "year") %>%
+  cols_label(Female = "Female",
+             Male   = "Male") %>%
+  fmt_markdown(columns = c(Female, Male)) %>%
+  tab_options(
+    data_row.padding = px(3),
+    table.font.size = px(14))
+
+
+###############ALL to be merged manually
+
+
+#Boston
+boston<- final_data %>% filter(marathon=="Boston")
+summary_all <- boston %>%
+  group_by(year) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(
+    combined=paste0(
+      "N = ", N, "<br>",
+      sprintf("%.1f (%.1f)", mean_time, sd_time), "<br>",
+      sprintf("(%.1f, %.1f)", min_time, max_time))) %>%
+  select(year, combined)
+summary_all %>%
+  gt(rowname_col = "year") %>%
+  cols_label(combined="All Runners") %>%
+  fmt_markdown(columns="combined") %>%
+  tab_options(data_row.padding = px(3),table.font.size = px(14))
+
+
+
+
+#Berlin
+berlin<- final_data %>% filter(marathon=="Berlin")
+summary_all <- berlin %>%
+  group_by(year) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(
+    combined=paste0(
+      "N = ", N, "<br>",
+      sprintf("%.1f (%.1f)", mean_time, sd_time), "<br>",
+      sprintf("(%.1f, %.1f)", min_time, max_time))) %>%
+  select(year, combined)
+summary_all %>%
+  gt(rowname_col = "year") %>%
+  cols_label(combined="All Runners") %>%
+  fmt_markdown(columns="combined") %>%
+  tab_options(data_row.padding = px(3),table.font.size = px(14))
+
+
+#Chicago
+chicago<- final_data %>% filter(marathon=="Chicago")
+summary_all <- chicago %>%
+  group_by(year) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(
+    combined=paste0(
+      "N = ", N, "<br>",
+      sprintf("%.1f (%.1f)", mean_time, sd_time), "<br>",
+      sprintf("(%.1f, %.1f)", min_time, max_time))) %>%
+  select(year, combined)
+summary_all %>%
+  gt(rowname_col = "year") %>%
+  cols_label(combined="All Runners") %>%
+  fmt_markdown(columns="combined") %>%
+  tab_options(data_row.padding = px(3),table.font.size = px(14))
+
+#NYC
+NYC<- final_data %>% filter(marathon=="NYC")
+summary_all <- NYC %>%
+  group_by(year) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(
+    combined=paste0(
+      "N = ", N, "<br>",
+      sprintf("%.1f (%.1f)", mean_time, sd_time), "<br>",
+      sprintf("(%.1f, %.1f)", min_time, max_time))) %>%
+  select(year, combined)
+summary_all %>%
+  gt(rowname_col = "year") %>%
+  cols_label(combined="All Runners") %>%
+  fmt_markdown(columns="combined") %>%
+  tab_options(data_row.padding = px(3),table.font.size = px(14))
+
+
+
+
+#BOX AND WHISKER
+#BOSTON
+ggplot(boston, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Boston Marathon Chip Times by Gender") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(boston, aes(x = "", y =avg_chip_seconds / 3600)) +
+  geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Boston Marathon Chip Times - All Runners") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+#BERLIN
+ggplot(berlin, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Berlin Marathon Chip Times by Gender") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(berlin, aes(x = "", y =avg_chip_seconds / 3600)) +
+  geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Berlin Marathon Chip Times - All Runners") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+#CHICAGO
+ggplot(chicago, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Chicago Marathon Chip Times by Gender") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(chicago, aes(x = "", y =avg_chip_seconds / 3600)) +
+  geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Chicago Marathon Chip Times - All Runners") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+
+#NYC
+ggplot(NYC, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "NYC Marathon Chip Times by Gender") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(NYC, aes(x = "", y =avg_chip_seconds / 3600)) +
+  geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "NYC Marathon Chip Times - All Runners") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+```
+

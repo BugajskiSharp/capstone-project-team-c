@@ -4,7 +4,7 @@ Predicting Marathon Average Finishing Times: The Impact of Weather and Air Quali
 ## Background: 
 Research has shown weather conditions and air quality can significantly affect a runner's marathon performance.
 
-This project explores how environmental factors—such as temperature, dew point, wind speed, precipitation, visibility, and air quality collectively impact average finishing times across different performance groups (elite, competitive, intermediate, recreational and slow runners). The goal is to determine whether these conditions can help predict how different groups of runners are affected by the environment in a given year.
+This project explores how environmental factors—such as temperature, dew point, wind speed, precipitation, visibility, and air quality collectively impact average finishing times across different performance groups (elite, competitive, intermediate, recreational and slow runners) and genders. The goal is to determine whether these conditions can help predict how different groups of runners are affected by the environment in a given year.
 
 Understanding these patterns can help:
 
@@ -21,6 +21,21 @@ Can weather and environmental factors—such as temperature, wind speed, precipi
 **Hypothesis:** Poor weather conditions (e.g., higher temperatures, dew point wind speed, precipitation, sea level pressure, or worse air quality) are associated with slower average finishing times, particularly for non-elite runners.
 
 **Predictions:**  Elite runners are expected to be less affected by challenging weather and air quality, competitive and slow runners will experience greater slowdowns as conditions worsen with slow runners experiencing greater slowdowns. Female runners will show slightly less performance declines under adverse weather and environmental conditions. Overall, favorable conditions—moderate temperatures, low humidity, and clean air are expected to be associated with faster finishing times for all groups.
+
+## Folder Structure 
+
+- `data`: contains the raw datasets, merged dataset, and data dictionary 
+- `notebooks`: contains the R Markdown source files with all code and analysis. 
+- `reports`: contains all reports 
+- `capstone-project-team-c.Rproj`: The RStudio Project file. Opening this file sets the project root
+- `README.md`: project overview 
+
+## How to Run
+1. Clone the repository
+2. Open the project - Open `capstone-project-team-c.Rproj` in RStudio (sets the project root)
+3. Open the `notebooks` folder and select an .Rmd
+3. Install any required packages (once per machine)
+4. Run the .Rmd
 
 ## Team Members
 - Krisha Bugajski-Sharp
