@@ -4,7 +4,7 @@ output: html_document
 date: "2025-11-14"
 ---
 
-libraries
+libraries (KB)
 ```{r}
 library(here)
 library(dplyr)
@@ -14,7 +14,7 @@ library(tibble)
 library(knitr)
 ```
 
-Importing data
+Importing data (KB)
 ```{r}
 weather = read.csv(here("data","raw-data","weather-data.csv"))
 airquality = read.csv(here("data","raw-data","air-quality-data.csv"))
@@ -24,7 +24,7 @@ nyc = read.csv(here("data","raw-data","nyc-marathon-data.csv"))
 berlin = read.csv(here("data","raw-data","berlin-marathon-data.csv"))
 ```
 
-Taking a look at the datasets
+Taking a look at the datasets (KB)
 ```{r}
 str(boston)
 str(berlin)
@@ -34,7 +34,7 @@ str(weather)
 str(airquality)
 ```
 
-Standardize all the marathon datasets
+Standardize all the marathon datasets (KB)
 ```{r}
 boston_clean <- boston %>%
   transmute(
@@ -69,7 +69,7 @@ chicago_clean <- chicago %>%
   )
 ```
 
-Standardize weather data
+Standardize weather data (KB)
 ```{r}
 weather_clean <- weather %>%
   transmute(
@@ -86,7 +86,7 @@ weather_clean <- weather %>%
   )
 ```
 
-Standardize airquality data
+Standardize airquality data (KB)
 ```{r}
 airquality_clean <- airquality %>%
   transmute(
@@ -102,7 +102,7 @@ airquality_clean <- airquality %>%
   )
 ```
 
-Combine the marathon datasets
+Combine the marathon datasets (KB)
 ```{r}
 # using bind_rows so we can row-wise combine and have data for each runner
 marathons_all <- bind_rows(
@@ -114,7 +114,7 @@ marathons_all <- bind_rows(
 str(marathons_all)
 ```
 
-Select only years we need (1996 to 2025)
+Select only years we need (1996 to 2025) (KB)
 ```{r}
 marathons_all <- marathons_all %>%
   filter(year >= 1996 & year <= 2025)
@@ -122,7 +122,7 @@ marathons_all <- marathons_all %>%
 str(marathons_all)
 ```
 
-Chip-Time Cleaning Function (pulled from chatgbt): need chip_seconds to find the average finishing times
+Chip-Time Cleaning Function (pulled from chatgbt): need chip_seconds to find the average finishing times (KB)
 ```{r}
 clean_chip_time <- function(x) {
   
@@ -153,13 +153,13 @@ clean_chip_time <- function(x) {
 
 ```
 
-Clean chip_time
+Clean chip_time (KB)
 ```{r}
 marathons_all <- marathons_all %>%
   mutate(chip_time_clean = clean_chip_time(chip_time))
 ```
 
-Convert the cleaned chip_time values to H:M:S and get chip_seconds
+Convert the cleaned chip_time values to H:M:S and get chip_seconds (KB)
 ```{r}
 marathons_all <- marathons_all %>%
   mutate(
@@ -171,7 +171,7 @@ marathons_all <- marathons_all %>%
 head(marathons_all)
 ```
 
-Need to see what we want to do with these missing values and where they are coming from
+Need to see what we want to do with these missing values and where they are coming from (KB)
 ```{r}
 marathons_all %>% 
   summarize(missing_finish_times = sum(is.na(chip_seconds)))
@@ -180,14 +180,13 @@ marathons_all %>%
   filter(is.na(chip_seconds))
 ```
 
-Remove missing finish times. This is safe because we only use average finishing times in our model, so individual missing times don not matter. Also there are only 3 total. 
+Remove missing finish times. This is safe because we only use average finishing times in our model, so individual missing times don not matter. Also there are only 3 total. (KB)
 ```{r}
 marathons_all <- marathons_all %>%
   filter(!is.na(chip_seconds))
 ```
 
-Labeling Gender as 'male', 'female', or 'unknown', nonbinary falls under female
-
+Labeling Gender as 'male', 'female', or 'unknown', nonbinary falls under female (KB)
 ```{r}
 unique(marathons_all$gender)
 ```
@@ -206,7 +205,7 @@ marathons_all <- marathons_all %>%
 table(marathons_all$gender)
 ```
 
-Removing unknowns since we have only 29 unknowns, and they will not help the model and most likely add noise:
+Removing unknowns since we have only 29 unknowns, and they will not help the model and most likely add noise: (KB)
 ```{r}
 marathons_all <- marathons_all %>% 
   filter(gender != "unknown")
@@ -215,7 +214,7 @@ table(marathons_all$gender)
 ```
 
 
-Creating time_ratio and using histogram to create subgroups 
+Creating time_ratio and using histogram to create subgroups (KB)
 ```{r}
 # Add winner_time for each marathon-year-gender
 runners <- marathons_all %>%
@@ -249,7 +248,6 @@ ggplot(runners, aes(x = time_ratio, fill = gender)) +
   ) +
   theme_minimal()
 ```
-
 ```{r}
 runners %>%
   group_by(gender, subgroup) %>%
@@ -257,7 +255,7 @@ runners %>%
   arrange(gender, subgroup)
 ```
 
-Compute average finishing time per subgroup
+Compute average finishing time per subgroup (KB)
 ```{r}
 avg_times <- runners %>%
   group_by(marathon, year, gender, subgroup) %>%
@@ -270,7 +268,7 @@ avg_times <- runners %>%
 avg_times
 ```
 
-Left join weather_clean and airquailty_clean onto the cleaned marathon datasets
+Left join weather_clean and airquailty_clean onto the cleaned marathon datasets (KB)
 ```{r}
 final_data <- avg_times %>%
   left_join(weather_clean, by = c("year", "marathon")) %>%
@@ -284,7 +282,7 @@ final_data
 str(final_data)
 ```
 
-Export final data to csv
+Export final data to csv (KB)
 ```{r}
 #write_csv(final_data, "merged_marathon_data.csv")
 ```

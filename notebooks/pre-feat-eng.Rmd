@@ -4,7 +4,7 @@ date: "2025-11-20"
 output: html_document
 ---
 
-Load libraries
+Load libraries (KB, ZD, MH)
 ```{r}
 library(here)
 library(dplyr)
@@ -15,17 +15,19 @@ library(corrplot)
 library(VIM)
 ```
 
-Importing the data
+Importing the data (KB)
 ```{r}
 final_data <- read.csv(here("data", "merged_marathon_data.csv"))
 ```
 
+(ZD)
 ```{r}
 # view merged data
 str(final_data)
 summary(final_data)
 ```
-Looking at the full dataset for missing values 
+
+Looking at the full dataset for missing values (ZD)
 ```{r}
 # missing values for visibility, co, pm10, pm2.5
 missing_summary <- final_data %>%
@@ -34,17 +36,16 @@ missing_summary <- final_data %>%
 knitr::kable(missing_summary, caption = "Missing Values per Variable")
 ```
 
-# Spliting the data so Berlin is used as a second case study to show how the method performs with missing data (whether successful or not).
-
+#Spiting the data so Berlin is used as a second case study to show how the method performs with missing data (whether successful or not). (KB)
 ```{r}
 main_data <- final_data %>% filter(marathon != "Berlin")
 berlin_data <- final_data %>% filter(marathon == "Berlin")
 ```
-
 ```{r}
 str(main_data)
 ```
-# Handling Missing Values
+
+#Handling Missing Values (ZD, KB)
 ```{r}
 # missing values
 missing_summary <- main_data %>%
@@ -53,13 +54,13 @@ missing_summary <- main_data %>%
 knitr::kable(missing_summary, caption = "Missing Values per Variable")
 ```
 
-Since PM10 has alot of missing values still, we will drop that column completely 
+Since PM10 has a lot of missing values still, we will drop that column completely: (KB)
 ```{r}
 main_data <- main_data %>%
   select(-pm10) 
 ```
 
-Since PM2.5 is often the main pollutant, we decided to use KNN imputation to fill missing PM2.5 values because it predicts missing data using similar rows without assuming a specific parametric relationship, preserves variance, and works well for our relatively small dataset while using correlations with other environmental variables
+Since PM2.5 is often the main pollutant, we decided to use KNN imputation to fill missing PM2.5 values because it predicts missing data using similar rows without assuming a specific parametric relationship, preserves variance, and works well for our relatively small dataset while using correlations with other environmental variables: (KB)
 ```{r}
 # Impute missing PM2.5 values using 5 nearest neighbors
 main_data <- kNN(main_data, variable = "pm25", k = 5) # can change later to see which K gives best model performance 
@@ -76,7 +77,7 @@ summary(main_data$pm25)
 ```
 
 
-Convert categorical variables to factors
+Convert categorical variables to factors: (KB)
 ```{r}
 main_data  <- main_data  %>%
   mutate(subgroup = factor(subgroup),
@@ -86,8 +87,8 @@ main_data  <- main_data  %>%
 
 str(main_data )
 ```
-# Feature engineering 
 
+# Feature engineering (ZD)
 ```{r}
 # create interaction terms and convert supershoe to factor
 main_data <- main_data %>%
@@ -106,8 +107,7 @@ main_data <- main_data %>%
 str(main_data)
 ```
 
-# Need to do a Quick correlation check for numeric variables and see what features inroduce multicollinearity
-
+# Need to do a Quick correlation check for numeric variables and see what features inroduce multicollinearity (KB)
 ```{r}
 # Find numeric columns after feature engineering, excluding 'year'
 numeric_vars <- main_data %>%
@@ -118,15 +118,15 @@ numeric_vars <- main_data %>%
 numeric_vars
 ```
 
-Correlation matrix
+Correlation matrix: (KB)
 ```{r}
 cor_matrix <- cor(main_data[numeric_vars], use = "pairwise.complete.obs")
 
 # rounding
 round(cor_matrix, 2)
 ```
-
 ```{r}
+#ploting
 corrplot(
   cor_matrix,
   method = "color",
@@ -135,14 +135,14 @@ corrplot(
 )
 ```
 
-Observing categorical variables and their distributions
+Observing categorical variables and their distributions: (KB)
 ```{r}
 table(main_data$pm25_imp) # think this will error out since pm25_imp is removed above
 table(main_data$main_pollutant)
 table(main_data$supershoe)
 ```
 
-Removing correlated variables
+Removing correlated variables: (KB)
 ```{r}
 cols_to_remove <- c(
   "high_temp",
@@ -162,8 +162,7 @@ str(main_data)
 
 ```
 
-# Data Scaling (for linear regression model)
-
+# Data Scaling (for linear regression model): (ZD, KB)
 ```{r}
 # Identify numeric predictors to scale (exclude outcome and identifiers)
 numeric_vars <- main_data %>%
@@ -176,19 +175,14 @@ scaled_vars <- paste0("scaled_", numeric_vars)
 main_data[scaled_vars] <- scale(main_data[numeric_vars])
 
 str(main_data)
-
 ```
-
-
 ```{r}
 # summary of scaled variables
 summary(main_data[scaled_vars])
 
 ```
 
-#(Ended HERE)
-
-# adding our 90/10 training/test split
+# Add our 90/10 training/test split (ZD)
 ```{r}
 # split data into train and test
 set.seed(123)
@@ -201,17 +195,19 @@ test_data  <- main_data[-train_index, ]
 
 
 ------------------------
-IDEAS:
+Dictionary:
 
-# indicate and define year of covid
+  ``` code ideas that were not used
+  ```
+  
+# indicate and define year of covid (ZD)
 final_data <- final_data %>%
   mutate(
     covid_era = ifelse(year == 2020, 1, 0)
   )
 
 
-
-# replacing the numeric variables with missing data with mean (could do median if we keep this); most likely dropping though
+# replacing the numeric variables with missing data with mean (could do median if we keep this); most likely dropping though (ZD)
 numeric_vars <- final_data %>%
   select(where(is.numeric)) %>%
   names()
@@ -221,7 +217,7 @@ final_data <- final_data %>%
 
 
 
-# create custom cutoff times for performance groups
+# create custom cutoff times for performance groups (ZD)
 final_data <- final_data %>%
   mutate(
     finish_hours = avg_chip_seconds / 3600, # think we are having all time in seconds, need fixing
@@ -233,20 +229,3 @@ final_data <- final_data %>%
       TRUE ~ "slow"
     )
   )
-
-# create interaction terms and convert supershoe to factor
-main_data <- main_data %>%
-  mutate(
-    pm25_imp  = factor(pm25_imp, levels = c(FALSE, TRUE)), # i dont think we need this
-    supershoe = factor(ifelse(year >= 2018, 1, 0), levels = c(0, 1)),
-    temp_dew_interaction       = avg_temp * dew_point,
-    temp_aqi_interaction       = avg_temp * aqi, # optional
-    temp_precip_interaction    = avg_temp * precipitation,
-    temp_wind_interaction      = avg_temp * wind_speed,
-    pm25_temp_interaction      = pm25 * avg_temp,
-    dew_wind_interaction       = dew_point * wind_speed,
-    pressure_temp_interaction  = sea_level_pressure * avg_temp,
-    avg_temp_gender_interaction = avg_temp * as.numeric(gender == "male")
-  )
-
-str(main_data)

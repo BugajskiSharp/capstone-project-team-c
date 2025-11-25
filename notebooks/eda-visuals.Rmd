@@ -4,7 +4,7 @@ output: html_document
 date: "2025-11-19"
 ---
 
-libraries
+libraries (KB, ZD, MH)
 ```{r}
 library(here)
 library(dplyr)
@@ -16,12 +16,12 @@ library(corrplot)
 library(gt)
 ```
 
-Importing data
+Importing data. (KB)
 ```{r}
 final_data = read.csv(here("data","merged_marathon_data.csv"))
 ```
 
-Tables and Graphing: 
+Tables and Graphing:
 ```{r}
 # Table 1: Continuous Variable Summary
 # Select the continuous variables
@@ -145,8 +145,7 @@ corrplot(
 
 ```
 
-
-Table for continuous variables:
+Select the continuous variables to make a clean table: (KB)
 ```{r}
 # Select continuous variables
 continuous_vars <- final_data %>% 
@@ -170,8 +169,7 @@ continuous_vars <- final_data %>%
 
 str(continuous_vars)
 ```
-
-
+Find Statistics for only the continuous variables: (KB)
 ```{r}
 continuous_only <- continuous_vars %>%
   select(where(is.numeric))
@@ -192,7 +190,7 @@ continuous_summary
 
 ```
 
-
+Add continuous variables to a clean table: (KB)
 ```{r}
 summary_table <- tribble(
   ~variable, ~mean, ~sd, ~median, ~min, ~max, ~skew, ~kurtosis, ~n,
@@ -216,6 +214,7 @@ kable(summary_table, caption = "Table: Descriptive Statistics for Continuous Var
 
 ```
 
+Scatter plot for pollutants we have concerns with (co, pm10, pm2.5, and overall aqi): (KB)
 ```{r}
 # Make pollutant data into long format for graphing
 pollutant_long <- final_data %>%
@@ -245,7 +244,7 @@ ggplot(pollutant_long,
 
 ```
 
-
+Scatter plots to see how the new subgroups behave over the years: (KB)
 ```{r}
 # Scatter plots by marathon and subgroup
 ggplot(final_data, aes(x = year, y = avg_chip_seconds)) +
@@ -265,7 +264,7 @@ ggplot(final_data, aes(x = year, y = avg_chip_seconds)) +
   )
 
 ```
-
+(MH)
 ```{r}
 #Add 'Overall' graph, making df 'final_data2' for purpose of figure 5 and  6
 final_data2 <- final_data %>% mutate(subgroup = tolower(as.character(subgroup))) %>% bind_rows(final_data %>% 
@@ -284,7 +283,7 @@ ggplot(final_data2, aes(x = visibility, y = avg_chip_seconds / 3600, color = mar
   ) +
   theme(legend.position = "right")
 ```
-
+(MH)
 ```{r}
 #Figure 6: Average Finishing Time by Year, Subgroup, Gender (Supershoes)
 ggplot(final_data2, aes(x = year, y = avg_chip_seconds, color = marathon)) +
@@ -302,7 +301,7 @@ ggplot(final_data2, aes(x = year, y = avg_chip_seconds, color = marathon)) +
 ```
 
 
-Summary Tables and Box and whisker plots
+Summary Tables and Box and whisker plots: (MH)
 ```{r}
 #Boston
 boston <- final_data %>% filter(marathon=="Boston")
@@ -634,6 +633,7 @@ ggplot(NYC, aes(x = "", y =avg_chip_seconds / 3600)) +
         axis.ticks.x = element_blank())
 ```
 
+Histograms to visualize the continous variables: (KB)
 ```{r}
 continuous_vars <- final_data %>% 
   select(avg_chip_seconds, high_temp, low_temp, avg_temp, 
