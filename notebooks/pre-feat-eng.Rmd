@@ -15,7 +15,7 @@ library(corrplot)
 library(VIM)
 ```
 
-Importing the data (KB)
+Import data (KB)
 ```{r}
 final_data <- read.csv(here("data", "merged_marathon_data.csv"))
 ```
@@ -27,7 +27,7 @@ str(final_data)
 summary(final_data)
 ```
 
-Looking at the full dataset for missing values (ZD)
+Look at the full dataset for missing values (ZD)
 ```{r}
 # missing values for visibility, co, pm10, pm2.5
 missing_summary <- final_data %>%
@@ -36,14 +36,14 @@ missing_summary <- final_data %>%
 knitr::kable(missing_summary, caption = "Missing Values per Variable")
 ```
 
-#Spiting the data so Berlin is used as a second case study to show how the method performs with missing data (whether successful or not). (KB)
+ Spit the data so Berlin is used as a second case study to show how the method performs with missing data (whether successful or not). (KB)
 ```{r}
 main_data <- final_data %>% filter(marathon != "Berlin")
 berlin_data <- final_data %>% filter(marathon == "Berlin")
-```
-```{r}
+
 str(main_data)
 ```
+We can see the main_data with out berlin now has 770 obs. and 21 variables. 
 
 #Handling Missing Values (ZD, KB)
 ```{r}
@@ -53,6 +53,8 @@ missing_summary <- main_data %>%
 
 knitr::kable(missing_summary, caption = "Missing Values per Variable")
 ```
+
+In the main_data, we can see that there are still 320 missing values for pm10 and 70 missing values for pm2.5. 
 
 Since PM10 has a lot of missing values still, we will drop that column completely: (KB)
 ```{r}
@@ -75,7 +77,7 @@ main_data <- main_data[, !(names(main_data) %in% cols_to_remove)]
 # Check that missing values are filled
 summary(main_data$pm25)
 ```
-
+We can see that there are no missing values now and we can get a clean summary of the data. 
 
 Convert categorical variables to factors: (KB)
 ```{r}
@@ -87,6 +89,7 @@ main_data  <- main_data  %>%
 
 str(main_data )
 ```
+We can see that the identifiers (subgroup, gender, marathon) and predictor (main_pollutant) were all converted to factors so that our models can properly recognized them. 
 
 # Feature engineering (ZD)
 ```{r}
@@ -109,23 +112,23 @@ str(main_data)
 
 # Need to do a Quick correlation check for numeric variables and see what features inroduce multicollinearity (KB)
 ```{r}
-# Find numeric columns after feature engineering, excluding 'year'
+# Find numeric columns after feature engineering, excluding 'year' and 'n' since they are idenifiers
 numeric_vars <- main_data %>%
   select(where(is.numeric)) %>%
-  select(-year) %>% 
+  select(-year, -n) %>% 
   names()
 
 numeric_vars
 ```
+We can see that there are a total 14 continuous variables, disincluding the identifiers `year` and `n`. 
 
-Correlation matrix: (KB)
+Creat Correlation Matrix and make a visual: (KB)
 ```{r}
 cor_matrix <- cor(main_data[numeric_vars], use = "pairwise.complete.obs")
 
 # rounding
 round(cor_matrix, 2)
-```
-```{r}
+
 #ploting
 corrplot(
   cor_matrix,
@@ -134,15 +137,18 @@ corrplot(
   tl.cex = 0.6
 )
 ```
+Looking at the visual, we can see that a lot of these features were highly correlated and will have to be removed. For example, high_temp and low_temp are strongly correlated with avg_temp (0.93 and 0.92), and aqi overlaps with pm25 (0.94). Interaction terms like temp_dew_interaction, temp_precip_interaction, and pressure_temp_interaction show very high correlations with their constituent variables (up to 1.00), making them redundant. Similarly, main_pollutant is just a categorical version of aqi. Overall, these features provide little additional information and can be removed to reduce multicollinearity. 
 
-Observing categorical variables and their distributions: (KB)
+Observing categorical variables and their distributions to see if we should keep or remove: (KB)
 ```{r}
-table(main_data$pm25_imp) # think this will error out since pm25_imp is removed above
 table(main_data$main_pollutant)
 table(main_data$supershoe)
 ```
+We can see that main_pollutant still contains data from pm10 which was removed. Also we know that main_pollutant is the categorical variable for aqi, and since aqi is highly correlated with pm2.5 (often the main_pollutant), we will drop aqi and main_pollutant all together. 
 
-Removing correlated variables: (KB)
+Looking at the supershoes variable, there is an expected imbalance, with more observations of years without supershoes (0 = 640) and fewer with supershoes (1 = 130) since they were introduced more recently in 2018. We will keep this as a control variable, and if needed, techniques like weighting can be applied to help the imbalance.
+
+Removing correlated variables as seen above: (KB)
 ```{r}
 cols_to_remove <- c(
   "high_temp",
@@ -161,6 +167,8 @@ main_data <- main_data[, !(names(main_data) %in% cols_to_remove)]
 str(main_data)
 
 ```
+Now we have a dataset that has 770 obs. and only 19 variables after the addition of newly engineered features and removal if highly correlated features. 
+
 
 # Data Scaling (for linear regression model): (ZD, KB)
 ```{r}
@@ -174,13 +182,10 @@ numeric_vars <- main_data %>%
 scaled_vars <- paste0("scaled_", numeric_vars)
 main_data[scaled_vars] <- scale(main_data[numeric_vars])
 
-str(main_data)
-```
-```{r}
 # summary of scaled variables
 summary(main_data[scaled_vars])
-
 ```
+We can see that all the continuous variables, not including the identifying variables `year` and `n`, were successfully scaled with means at 0 and standard deviations of 1, showing that the standardization was correctly applied.
 
 # Add our 90/10 training/test split (ZD)
 ```{r}
@@ -197,7 +202,7 @@ test_data  <- main_data[-train_index, ]
 ------------------------
 Dictionary:
 
-  ``` code ideas that were not used
+  ``` Contains code ideas that were not used.
   ```
   
 # indicate and define year of covid (ZD)
