@@ -4,7 +4,7 @@ output: html_document
 date: "2025-11-19"
 ---
 
-libraries
+libraries (KB, ZD, MH)
 ```{r}
 library(here)
 library(dplyr)
@@ -16,12 +16,12 @@ library(corrplot)
 library(gt)
 ```
 
-Importing data
+Importing data. (KB)
 ```{r}
 final_data = read.csv(here("data","merged_marathon_data.csv"))
 ```
 
-Tables and Graphing: 
+Tables and Graphing:
 ```{r}
 # Table 1: Continuous Variable Summary
 # Select the continuous variables
@@ -138,15 +138,14 @@ round(cor_matrix, 2)
 
 #Correlation Heat map
 corrplot(
-  cor_mat,
+  cor_matrix,
   method="color",col=colorRampPalette(c("darkblue", "white", "red"))(200),
   addCoef.col="black", tl.col="black", tl.srt=45             
 )
 
 ```
 
-
-Table for continuous variables:
+Select the continuous variables to make a clean table: (KB)
 ```{r}
 # Select continuous variables
 continuous_vars <- final_data %>% 
@@ -170,8 +169,9 @@ continuous_vars <- final_data %>%
 
 str(continuous_vars)
 ```
+We can see that there are a total of 14 continuous variables. 
 
-
+Find Statistics for only the continuous variables: (KB)
 ```{r}
 continuous_only <- continuous_vars %>%
   select(where(is.numeric))
@@ -192,7 +192,7 @@ continuous_summary
 
 ```
 
-
+Add continuous variables to a clean table: (KB)
 ```{r}
 summary_table <- tribble(
   ~variable, ~mean, ~sd, ~median, ~min, ~max, ~skew, ~kurtosis, ~n,
@@ -216,6 +216,12 @@ kable(summary_table, caption = "Table: Descriptive Statistics for Continuous Var
 
 ```
 
+The table above summarizes key descriptive statistics for continuous variables in the dataset, including average marathon chip time (in seconds), temperature measures, humidity-related metrics (dew point), wind speed, visibility, air pressure, and air quality indicators (aqi, co, ozone, pm10, pm2.5, no2). For each variable, the table reports its mean, standard deviation, median, minimum, maximum, skewness, kurtosis, and sample size, giving an overview of central tendency, variability, distribution shape, and data completeness.
+
+All the variables show reasonable ranges and central values for weather and airquality conditions during the marathon events. We can see that chip times cluster around 4 hours (about 15,600 seconds) with moderate variability. Temperature measures (high, low, and average) fall within typical seasonal ranges, while air-quality variables such as ozone, pm10, pm2.5, and co show right-skewed distributions, indicating occasional higher pollution days. Visibility also shows strong right skew and high kurtosis, suggesting a few unusually high values compared with the rest of the data. Overall, most variables are moderately skewed, with some (like visibility and co) showing heavier tails.
+
+
+Scatter plot for pollutants we have concerns with (co, pm10, pm2.5, and overall aqi): (KB)
 ```{r}
 # Make pollutant data into long format for graphing
 pollutant_long <- final_data %>%
@@ -245,7 +251,29 @@ ggplot(pollutant_long,
 
 ```
 
+We can see that most of the subgroups follow similar patterns with airquality. As airquality increase, we see an increase in most average finishing times, with some starting to level out at a certain pollutant level among faster subgroups, such as `pm2.5` for elite and competitive subgroups. We can also see that `co` behaves oddly, specifically for slow runners, increasing as fishing time get faster with higher pollutant levels. However this is most likey due to missing `co` data for Berlin. 
 
+Histograms to visualize the continous variables: (KB)
+```{r}
+continuous_vars <- final_data %>% 
+  select(avg_chip_seconds, high_temp, low_temp, avg_temp, 
+         dew_point, wind_speed, visibility, sea_level_pressure,
+         aqi, co, ozone, pm10, pm25, no2) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value")
+
+ggplot(continuous_vars, aes(x = value)) +
+  geom_histogram(bins = 30, fill = "#4A90E2", color = "white") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Histograms of Continuous Variables",
+       x = "Value",
+       y = "Count")
+
+```
+Looking at histograms for all the continuous variables, we can see the distribution shapes. Several of the environmental variables did display expected right skews (such as PM2.5 and wind speed). There is no transformation currently planned for our modeling goals. We can also see that finishing times were right skewed, which is typical for marathon data.
+
+
+Scatter plots to see how the new subgroups behave over the years: (KB)
 ```{r}
 # Scatter plots by marathon and subgroup
 ggplot(final_data, aes(x = year, y = avg_chip_seconds)) +
@@ -265,7 +293,9 @@ ggplot(final_data, aes(x = year, y = avg_chip_seconds)) +
   )
 
 ```
+We cans see that over time, most finishing times become faster. We can also see potential shifts in faster finishing times past 2018, where there was the introduction of supershoes. We can really see this in the Chicago marathon, as it has data till 2023. We can potentially see the trend starting with Berlin, however it is hard to tell since the data is only available till 2019. NYC seems to have a pretty  constant finishing times over the years. Boston on the other hand, seems to have increasing finishing times, however it is also hard to interpret the affect of supershoes due to data only being available till 2019, only one year after supershoes have been widely introduced. 
 
+(MH)
 ```{r}
 #Add 'Overall' graph, making df 'final_data2' for purpose of figure 5 and  6
 final_data2 <- final_data %>% mutate(subgroup = tolower(as.character(subgroup))) %>% bind_rows(final_data %>% 
@@ -284,7 +314,7 @@ ggplot(final_data2, aes(x = visibility, y = avg_chip_seconds / 3600, color = mar
   ) +
   theme(legend.position = "right")
 ```
-
+(MH)
 ```{r}
 #Figure 6: Average Finishing Time by Year, Subgroup, Gender (Supershoes)
 ggplot(final_data2, aes(x = year, y = avg_chip_seconds, color = marathon)) +
@@ -302,7 +332,7 @@ ggplot(final_data2, aes(x = year, y = avg_chip_seconds, color = marathon)) +
 ```
 
 
-Summary Tables and Box and whisker plots
+Summary Tables and Box and whisker plots: (MH)
 ```{r}
 #Boston
 boston <- final_data %>% filter(marathon=="Boston")
@@ -633,4 +663,3 @@ ggplot(NYC, aes(x = "", y =avg_chip_seconds / 3600)) +
         axis.text.x  = element_blank(),
         axis.ticks.x = element_blank())
 ```
-
