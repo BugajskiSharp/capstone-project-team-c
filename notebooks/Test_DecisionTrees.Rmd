@@ -254,8 +254,9 @@ runners %>%
 #We can see that the subgroups now have groups for `male` and `female`. We can see that the elite groups both has less runners and male runners have more runners in each group overall. We will leave this as is because these cutoffs are not arbitrary, and they follow the natural shape of the data rather than relying on fixed percentile breaks. Weighting could later be applied; however, it is not initially because subgroup effects are not the primary focus.
 
 
+#(MH)
 
-#Compute average finishing time per mararthon/year (MH)
+#Compute average finishing time per mararthon/year
 
 avg_times <- runners %>%
   group_by(marathon, year) %>%
@@ -311,7 +312,7 @@ final_data <- final_data %>% filter(marathon != "Berlin")
 
 
 
-#(MH)
+
 #Decision tree looking at weather and airquality features to consider breaking down into bins
 #reference: https://bradleyboehmke.github.io/HOML/DT.html
 
@@ -333,21 +334,25 @@ final_data$temp_bin <- cut(final_data$avg_temp,
                            labels = c("cool", "moderate", "warm")
 )
 
-final_data$ozone_bin <- ifelse(final_data$ozone >= 41, "high", "low")
-final_data$pm25_bin <- ifelse(final_data$pm25 >= 62, "very high", "normal")
+final_data$ozone_bin <- ifelse(final_data$ozone >= 41, "higher", "lower")
+
+final_data$sea_level_pressure_bin <- ifelse(final_data$sea_level_pressure <30, "lower", "higher")
+
+final_data$pm25_bin <- ifelse(final_data$pm25 >= 62, "very high", "lower")
 
 #Comparing models with continuous and binned data
-model_cont <- lm(avg_chip_seconds ~ avg_temp + ozone + pm25, data = final_data)
+model_cont <- lm(avg_chip_seconds ~ avg_temp + ozone + sea_level_pressure + pm25, data = final_data)
 
-model_bin <- lm(avg_chip_seconds ~ temp_bin + ozone_bin + pm25_bin, data = final_data)
+model_bin <- lm(avg_chip_seconds ~ temp_bin + ozone_bin + sea_level_pressure_bin + pm25_bin, data = final_data)
 
-model_temp <- lm(avg_chip_seconds ~ temp_bin + ozone + pm25, data = final_data)
+model_temp <- lm(avg_chip_seconds ~ temp_bin + ozone + sea_level_pressure + pm25, data = final_data)
 
-model_temp_ozone <- lm(avg_chip_seconds ~ temp_bin + ozone_bin + pm25, data = final_data)
+model_temp_ozone <- lm(avg_chip_seconds ~ temp_bin + ozone_bin + sea_level_pressure + pm25, data = final_data)
 
-model_airbin <- lm(avg_chip_seconds ~ avg_temp + ozone_bin + pm25_bin, data = final_data)
+model_airbin <- lm(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25_bin, data = final_data)
 
-model_ozone <- lm(avg_chip_seconds ~ avg_temp + ozone_bin + pm25, data = final_data)
+model_ozone <- lm(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25, data = final_data)
+
 
 #Comparing R2
 summary(model_cont)$r.squared
@@ -364,37 +369,36 @@ AIC(model_temp_ozone)
 AIC(model_airbin)
 AIC(model_ozone)
 
-
 #caret cross validation results
 set.seed(123)
 train_control <- trainControl(method = "cv", number = 10)
 
-cv_cont <- train(avg_chip_seconds ~ avg_temp + ozone + pm25,
+cv_cont <- train(avg_chip_seconds ~ avg_temp + ozone + sea_level_pressure + pm25,
                  data = final_data,
                  method = "lm",
                  trControl = train_control)
 
-cv_bin <- train(avg_chip_seconds ~ temp_bin + ozone_bin + pm25_bin,
+cv_bin <- train(avg_chip_seconds ~ temp_bin + ozone_bin + sea_level_pressure_bin + pm25_bin,
                 data = final_data,
                 method = "lm",
                 trControl = train_control)
 
-cv_temp <- train(avg_chip_seconds ~ temp_bin + ozone + pm25,
+cv_temp <- train(avg_chip_seconds ~ temp_bin + ozone + sea_level_pressure + pm25,
                  data = final_data,
                  method = "lm",
                  trControl = train_control)
 
-cv_temp_ozone <- train(avg_chip_seconds ~ temp_bin + ozone_bin + pm25,
+cv_temp_ozone <- train(avg_chip_seconds ~ temp_bin + ozone_bin + sea_level_pressure + pm25,
                  data = final_data,
                  method = "lm",
                  trControl = train_control)
 
-cv_airbin <- train(avg_chip_seconds ~ avg_temp + ozone_bin + pm25_bin,
+cv_airbin <- train(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25_bin,
                        data = final_data,
                        method = "lm",
                        trControl = train_control)
 
-cv_ozone <- train(avg_chip_seconds ~ avg_temp + ozone_bin + pm25,
+cv_ozone <- train(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25,
                    data = final_data,
                    method = "lm",
                    trControl = train_control)
