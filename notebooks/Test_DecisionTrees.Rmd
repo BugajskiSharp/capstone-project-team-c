@@ -3,8 +3,9 @@ title: "Test_DecisionTrees"
 output: html_document
 ---
 
-#  Load all libraries (KB, MH)
 
+```{r}
+#  Load all libraries (KB, MH)
 library(here)
 library(dplyr)
 library(lubridate)
@@ -16,8 +17,10 @@ library(VIM)
 library(caret)
 library(rpart)
 library(rpart.plot)
+```
 
 
+```{r}
 #Import all raw data (KB)
 weather = read.csv(here("data","raw-data","weather-data.csv"))
 airquality = read.csv(here("data","raw-data","air-quality-data.csv"))
@@ -25,8 +28,9 @@ boston = read.csv(here("data","raw-data","boston-marathon-data.csv"))
 chicago = read.csv(here("data","raw-data","chicago-marathon-data.csv"))
 nyc = read.csv(here("data","raw-data","nyc-marathon-data.csv"))
 berlin = read.csv(here("data","raw-data","berlin-marathon-data.csv"))
+```
 
-
+```{r}
 #Standardize all the raw marathon datasets; clean variable names and select necessary variables (KB)
 
 boston_clean <- boston %>%
@@ -93,8 +97,10 @@ airquality_clean <- airquality %>%
     pm25 = as.numeric(PM2.5),
     no2 = as.numeric(NO2)
   )
+```
 
 
+```{r}
 #Combine the marathon datasets (KB)
 
 # using bind_rows so we can row-wise combine and have data for each runner
@@ -107,7 +113,10 @@ marathons_all <- bind_rows(
 str(marathons_all)
 
 #We can see that marathons_all contains the identifying variables (*year, marathon, gender*), and the outcome variable *chip_time*.
+```
 
+
+```{r}
 #Select only years we need (1996 to 2025) (KB)
 
 marathons_all <- marathons_all %>%
@@ -117,6 +126,10 @@ unique(marathons_all$year)
 
 #We can that the merged marathon data set now contains years from 1996 to 2023, as most dont have data up to 2025.
 
+```
+
+
+```{r}
 #Chip-Time Cleaning Function (pulled from chatgbt): need chip_seconds to find the average finishing times (KB)
 
 # Cleans and standardizes chip-time values by converting Excel-style numeric
@@ -152,7 +165,7 @@ clean_chip_time <- function(x) {
 
 
 #Clean chip_time; using `clean_chip_time` function (KB)
-  
+
 marathons_all <- marathons_all %>%
   mutate(chip_time_clean = clean_chip_time(chip_time))
 
@@ -167,7 +180,10 @@ marathons_all <- marathons_all %>%
 head(marathons_all)
 
 #We can see `chip_time` with the original data, `chip_time_clean` with the uniform cleaned data across all marathons, and `chip_seconds` with the total time in seconds. 
+```
 
+
+```{r}
 #Need to see what we want to do with these missing values and where they are coming from (KB)
 
 marathons_all %>% 
@@ -182,7 +198,11 @@ marathons_all %>%
 
 marathons_all <- marathons_all %>%
   filter(!is.na(chip_seconds))
+```
 
+
+```{r}
+#note from MH: While this entire code is not needed for the purposes of decision tree feature engineering discussion, for continuity of the processing code and removal of NAs it is kept here
 
 #Labeling Gender as 'male', 'female', or 'unknown', and we decided that nonbinary falls under female. (KB)
 
@@ -215,45 +235,10 @@ marathons_all <- marathons_all %>%
 table(marathons_all$gender)
 
 #We successfully removed the unknowns, leaving us with the desired `female` and `male`. 
-
-#Create a variable called winner_time, that consist of the winners or best finishing for that year. Then create a variable called time_ratio (), that consists of chip_seconds / winner_time. (KB)
-
+```
 
 
-
-# Add winner_time for each marathon-year-gender
-runners <- marathons_all %>%
-  group_by(marathon, year, gender) %>%
-  mutate(winner_time = min(chip_seconds, na.rm = TRUE)) %>%
-  ungroup() %>%
-  mutate(time_ratio = chip_seconds / winner_time)
-
-
-#Create subgroups based on time_ratio. Look at a histogram to adjust the boundaries of the subgroups based on the distribution of the histogram of time_ratio and clear clusters. (KB)
-
-runners <- runners %>%
-  mutate(
-    subgroup = case_when(
-      time_ratio <= 1.30 ~ "elite",
-      time_ratio > 1.30 & time_ratio <= 1.55 ~ "competitive",
-      time_ratio > 1.55 & time_ratio <= 1.80 ~ "average",
-      time_ratio > 1.80 & time_ratio <= 2.10 ~ "recreational",
-      time_ratio > 2.10 ~ "slow",
-      TRUE ~ NA_character_
-    ),
-    subgroup = factor(subgroup, levels = c("elite", "competitive", "average", "recreational", "slow"))
-  )
-
-#Now we can further divide the subgroups created by genders. (KB)
-
-runners %>%
-  group_by(gender, subgroup) %>%
-  summarise(count = n()) %>%
-  arrange(gender, subgroup)
-
-#We can see that the subgroups now have groups for `male` and `female`. We can see that the elite groups both has less runners and male runners have more runners in each group overall. We will leave this as is because these cutoffs are not arbitrary, and they follow the natural shape of the data rather than relying on fixed percentile breaks. Weighting could later be applied; however, it is not initially because subgroup effects are not the primary focus.
-
-
+```{r}
 #(MH)
 
 #Compute average finishing time per mararthon/year
@@ -272,8 +257,10 @@ avg_times
 final_data <- avg_times %>%
   left_join(weather_clean, by = c("year", "marathon")) %>%
   left_join(airquality_clean, by = c("year", "marathon"))
+```
 
-# move n (number of individuals representing each group) to the first column for neatness
+```{r}
+# move n (number of individuals representing each group) to the first column for neatness (KB)
 final_data <- final_data %>% 
   select(n, everything())
 
@@ -285,8 +272,6 @@ str(final_data)
 #clean environment up a little bit
 rm(boston, boston_clean, berlin, berlin_clean,nyc,nyc_clean,chicago,chicago_clean,
    marathons_all, airquality, airquality_clean,avg_times,weather,weather_clean,runners,clean_chip_time)
-#dropping from preprocessing and feature engineering
-final_data <- subset(final_data, select = -c(high_temp,low_temp,aqi,main_pollutant,pm10))
 
 # Impute missing PM2.5 values using 5 nearest neighbors
 final_data <- kNN(final_data, variable = "pm25", k = 5) # can change later to see which K gives best model performance 
@@ -301,33 +286,68 @@ final_data <- final_data[, !(names(final_data) %in% cols_to_remove)]
 # Check that missing values are filled
 summary(final_data$pm25)
 
+# create interaction terms and convert supershoe to factor
+#Unlike final data no gender interaction for sake of feature engineering investigation
+final_data <- final_data %>%
+  mutate(
+    supershoe = factor(ifelse(year >= 2018, 1, 0), levels = c(0, 1)),
+    temp_dew_interaction       = avg_temp * dew_point,
+    temp_aqi_interaction       = avg_temp * aqi, 
+    temp_precip_interaction    = avg_temp * precipitation,
+    temp_wind_interaction      = avg_temp * wind_speed,
+    pm25_temp_interaction      = pm25 * avg_temp,
+    dew_wind_interaction       = dew_point * wind_speed,
+    pressure_temp_interaction  = sea_level_pressure * avg_temp,
+  )
+
+cols_to_remove <- c(
+  "high_temp",
+  "low_temp",
+  "aqi",
+  "temp_dew_interaction",
+  "temp_precip_interaction",
+  "temp_wind_interaction",
+  "pm25_temp_interaction",
+  "dew_wind_interaction",
+  "pressure_temp_interaction",
+  "main_pollutant", 
+  "pm10"
+)
+final_data <- final_data[, !(names(final_data) %in% cols_to_remove)]
+
+
+# indicate and define year of covid (ZD)
+final_data <- final_data %>%
+  mutate(
+    covid_era = ifelse(year == 2020, 1, 0)
+  )
+
+
 
 
 #removed Berlin
 berlin_data <- final_data %>% filter(marathon == "Berlin")
 final_data <- final_data %>% filter(marathon != "Berlin")
+```
 
 
-
-
-
-
-
+```{r}
 #Decision tree looking at weather and airquality features to consider breaking down into bins
 #reference: https://bradleyboehmke.github.io/HOML/DT.html
 
 feature_check <- rpart(
   avg_chip_seconds ~ avg_temp + precipitation + dew_point + wind_speed + visibility +
-    sea_level_pressure + co + ozone + pm25 + no2,
+    sea_level_pressure + co + ozone + pm25 + no2 + supershoe + temp_aqi_interaction + covid_era,
   data = final_data,
   method = "anova"
 )
 
 # Plot showing important features and potential bins
 rpart.plot(feature_check)
+```
 
 
-
+```{r}
 #Categorical bins from tree
 final_data$temp_bin <- cut(final_data$avg_temp,
                            breaks = c(-Inf, 56, 66, Inf),
@@ -339,7 +359,10 @@ final_data$ozone_bin <- ifelse(final_data$ozone >= 41, "higher", "lower")
 final_data$sea_level_pressure_bin <- ifelse(final_data$sea_level_pressure <30, "lower", "higher")
 
 final_data$pm25_bin <- ifelse(final_data$pm25 >= 62, "very high", "lower")
+```
 
+
+```{r}
 #Comparing models with continuous and binned data
 model_cont <- lm(avg_chip_seconds ~ avg_temp + ozone + sea_level_pressure + pm25, data = final_data)
 
@@ -352,8 +375,9 @@ model_temp_ozone <- lm(avg_chip_seconds ~ temp_bin + ozone_bin + sea_level_press
 model_airbin <- lm(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25_bin, data = final_data)
 
 model_ozone <- lm(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25, data = final_data)
+```
 
-
+```{r}
 #Comparing R2
 summary(model_cont)$r.squared
 summary(model_bin)$r.squared
@@ -368,7 +392,10 @@ AIC(model_temp)
 AIC(model_temp_ozone)
 AIC(model_airbin)
 AIC(model_ozone)
+```
 
+
+```{r}
 #caret cross validation results
 set.seed(123)
 train_control <- trainControl(method = "cv", number = 10)
@@ -389,23 +416,39 @@ cv_temp <- train(avg_chip_seconds ~ temp_bin + ozone + sea_level_pressure + pm25
                  trControl = train_control)
 
 cv_temp_ozone <- train(avg_chip_seconds ~ temp_bin + ozone_bin + sea_level_pressure + pm25,
-                 data = final_data,
-                 method = "lm",
-                 trControl = train_control)
-
-cv_airbin <- train(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25_bin,
                        data = final_data,
                        method = "lm",
                        trControl = train_control)
 
-cv_ozone <- train(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25,
+cv_airbin <- train(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25_bin,
                    data = final_data,
                    method = "lm",
                    trControl = train_control)
 
+cv_ozone <- train(avg_chip_seconds ~ avg_temp + ozone_bin + sea_level_pressure + pm25,
+                  data = final_data,
+                  method = "lm",
+                  trControl = train_control)
+```
+
+
+```{r}
 cv_cont$results
 cv_bin$results
 cv_temp$results
 cv_temp_ozone$results
 cv_airbin$results
 cv_ozone$results
+```
+
+
+
+
+
+
+
+
+
+
+
+
