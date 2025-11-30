@@ -211,7 +211,7 @@ unique(marathons_all$gender)
 
 #We can see that there are a lot of ways 'male', 'female', 'nonbinary', and 'unknown' are labled.
 
-#Make all the genders uniform and standardized (KB)
+#Make all the genders uniform and standardized and merge nonbinary with female (KB)
 
 marathons_all <- marathons_all %>%
   mutate(
@@ -237,13 +237,12 @@ table(marathons_all$gender)
 #We successfully removed the unknowns, leaving us with the desired `female` and `male`. 
 ```
 
-
 ```{r}
 #(MH)
 
-#Compute average finishing time per mararthon/year
+#Compute average finishing time per mararthon/year (KB) (MH)
 
-avg_times <- runners %>%
+avg_times <- marathons_all %>% # (KB) switch to marathons_all dataset instead of runners dataset
   group_by(marathon, year) %>%
   summarize(
     n = n(),  # number of runners in each subgroup
@@ -253,7 +252,7 @@ avg_times <- runners %>%
 
 avg_times
 
-
+# Left join weather_clean and airquailty_clean onto the cleaned marathon datasets (KB) (MH)
 final_data <- avg_times %>%
   left_join(weather_clean, by = c("year", "marathon")) %>%
   left_join(airquality_clean, by = c("year", "marathon"))
@@ -270,8 +269,8 @@ str(final_data)
 
 #(KB from inital-modeling)
 #clean environment up a little bit
-rm(boston, boston_clean, berlin, berlin_clean,nyc,nyc_clean,chicago,chicago_clean,
-   marathons_all, airquality, airquality_clean,avg_times,weather,weather_clean,runners,clean_chip_time)
+#rm(boston, boston_clean, berlin, berlin_clean,nyc,nyc_clean,chicago,chicago_clean,
+#   marathons_all, airquality, airquality_clean,avg_times,weather,weather_clean,runners,clean_chip_time)
 
 # Impute missing PM2.5 values using 5 nearest neighbors
 final_data <- kNN(final_data, variable = "pm25", k = 5) # can change later to see which K gives best model performance 
@@ -321,8 +320,6 @@ final_data <- final_data %>%
   mutate(
     covid_era = ifelse(year == 2020, 1, 0)
   )
-
-
 
 
 #removed Berlin
