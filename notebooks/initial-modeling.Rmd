@@ -12,6 +12,7 @@ library(tidyr)
 library(ggplot2)
 library(corrplot)
 library(VIM)
+library(combinat)
 ```
 
 Importing the data
@@ -201,6 +202,38 @@ summary(main_data[scaled_vars])
 ```
 
 ```{r}
+# separate ozone and pm25 bin code
+#main_data$ozone_bin <- ifelse(main_data$ozone >= 38, 1, 0)
+#main_data$pm25_bin  <- ifelse(main_data$pm25 >= 54, 1, 0)
+
+#main_data$ozone_bin <- factor(main_data$ozone_bin)
+#main_data$pm25_bin  <- factor(main_data$pm25_bin)
+```
+
+```{r}
+# have temp and wind bins here for combination building, can remove and just focus on ozone and pm25
+# temp bin
+main_data$temp_bin <- ifelse(main_data$avg_temp <= 58, 
+                             "Cool or Moderate", 
+                             "Warm")
+main_data$temp_bin <- factor(main_data$temp_bin)
+
+# ozone bin
+main_data$ozone_bin <- ifelse(main_data$ozone >= 38, 1, 0)
+main_data$ozone_bin <- factor(main_data$ozone_bin)
+
+# pm25 bin
+main_data$pm25_bin <- ifelse(main_data$pm25 >= 54, 1, 0)
+main_data$pm25_bin <- factor(main_data$pm25_bin)
+
+# wind bin
+main_data$wind_bin <- ifelse(main_data$wind_speed >= 13, 1, 0)
+main_data$wind_bin <- factor(main_data$wind_bin)
+```
+
+
+
+```{r}
 # split data into train and test
 set.seed(123)
 
@@ -211,76 +244,178 @@ test_data  <- main_data[-train_index, ]
 ```
 
 ```{r}
-# updated environmental predictors
-env_vars <- c(
-  "avg_temp", "precipitation", "dew_point",
-  "wind_speed", "visibility", 
-  "sea_level_pressure", "pm25", "no2", "ozone"
+# dont think this is needed, can probably delete this
+lm_initial <- lm(
+  avg_chip_seconds ~ marathon + gender + subgroup +
+    supershoe +
+    avg_temp + precipitation + dew_point +
+    wind_speed + visibility + sea_level_pressure +
+    pm25_bin + ozone_bin +
+    temp_aqi_interaction + avg_temp_gender_interaction,
+  data = train_data
 )
 
-env_data <- main_data %>%
-  select(all_of(env_vars))
-
-pca_env <- prcomp(env_data, center = TRUE, scale. = TRUE)
-summary(pca_env)
+summary(lm_initial)
 ```
 
 ```{r}
-library(knitr)
+# can probably delete this too
+pred <- predict(lm_initial, newdata = test_data)
 
-pca_var <- data.frame(
-  PC = paste0("PC", 1:length(pca_env$sdev)),
-  Eigenvalue = pca_env$sdev^2,
-  Proportion_Variance = (pca_env$sdev^2) / sum(pca_env$sdev^2),
-  Cumulative_Variance = cumsum((pca_env$sdev^2) / sum(pca_env$sdev^2))
+rmse <- sqrt(mean((pred - test_data$avg_chip_seconds)^2))
+r2   <- cor(pred, test_data$avg_chip_seconds)^2
+
+rmse
+r2
+```
+```{r}
+# use environmental predictors both continuous and binned predictors
+env_predictors <- c(
+  "avg_temp", "temp_bin",
+  "ozone", "ozone_bin",
+  "pm25", "pm25_bin",
+  "wind_speed", "wind_bin"
 )
-
-kable(
-  pca_var,
-  digits = 3, # can adjust after
-  caption = "Table Y: Variance Explained by Principal Components for Environmental Variables"
-)
 ```
 
 ```{r}
-library(ggplot2)
-
-ggplot(pca_var, aes(x = as.numeric(gsub("PC", "", PC)), y = Proportion_Variance)) +
-  geom_point() +
-  geom_line() +
-  labs(
-    title = "Figure Y: Scree Plot for Environmental PCA",
-    x = "Principal Component",
-    y = "Proportion of Variance Explained"
-  ) +
-  theme_minimal()
-```
-
-```{r}
-pca_scores <- as.data.frame(pca_env$x[, 1:3])
-colnames(pca_scores) <- c("PC1_env", "PC2_env", "PC3_env")
-
-main_data_pca <- main_data %>%
-  bind_cols(pca_scores)
-```
-
-```{r}
-main_data_pca <- main_data_pca %>%
-  mutate(
-    marathon = factor(marathon),
-    gender = factor(gender),
-    subgroup = factor(subgroup),
-    supershoe = factor(supershoe)
+# build a multiple regression model
+evaluate_model <- function(predictors, train_data, test_data) {
+  
+  formula_string <- paste(
+    "avg_chip_seconds ~ marathon + gender + subgroup + supershoe +",
+    paste(predictors, collapse = " + ")
   )
+  
+  form <- as.formula(formula_string)
+  
+  model <- lm(form, data = train_data)
+  
+  preds <- predict(model, newdata = test_data)
+  actual <- test_data$avg_chip_seconds
+  
+  rmse <- sqrt(mean((preds - actual)^2))
+  r2   <- cor(preds, actual)^2
+  mae  <- mean(abs(preds - actual))
+  
+  return(data.frame(
+    Predictors = paste(predictors, collapse = ", "),
+    NumPredictors = length(predictors),
+    RMSE = rmse,
+    R2 = r2,
+    MAE = mae
+  ))
+}
+```
+
+
+```{r}
+# store results in a list
+all_results <- list()
+i <- 1
+
+# build loop to try combinations of predictors for 1 through 4 combinations
+for (k in 1:4) {
+  
+  combos <- combn(env_predictors, k, simplify = FALSE)
+  
+  for (combo in combos) {
+    all_results[[i]] <- evaluate_model(combo, train_data, test_data)
+    i <- i + 1
+  }
+}
+
+model_subset_results <- bind_rows(all_results)
 ```
 
 ```{r}
-set.seed(123)
+# print the results
+model_subset_results_sorted <- model_subset_results[
+  order(model_subset_results$RMSE), ]
 
-train_index <- sample(1:nrow(main_data_pca), size = 0.9 * nrow(main_data_pca))
+knitr::kable(
+  model_subset_results_sorted,
+  digits = 4,
+  caption = "Model Comparison Across All Subsets of Predictors"
+)
+```
 
-train_data <- main_data_pca[train_index, ]
-test_data  <- main_data_pca[-train_index, ]
+
+
+
+
+Think we can delete beyond this point, going to leave it all for now. Started commenting out the below:
+```{r}
+# updated environmental predictors
+#env_vars <- c(
+#  "avg_temp", "precipitation", "dew_point",
+#  "wind_speed", "visibility", 
+#  "sea_level_pressure", "pm25", "no2", "ozone"
+#)
+
+#env_data <- main_data %>%
+#  select(all_of(env_vars))
+
+#pca_env <- prcomp(env_data, center = TRUE, scale. = TRUE)
+#summary(pca_env)
+```
+
+```{r}
+#library(knitr)
+
+#pca_var <- data.frame(
+#  PC = paste0("PC", 1:length(pca_env$sdev)),
+#  Eigenvalue = pca_env$sdev^2,
+#  Proportion_Variance = (pca_env$sdev^2) / sum(pca_env$sdev^2),
+#  Cumulative_Variance = cumsum((pca_env$sdev^2) / sum(pca_env$sdev^2))
+#)
+
+#kable(
+#  pca_var,
+#  digits = 3, # can adjust after
+#  caption = "Table Y: Variance Explained by Principal Components for Environmental Variables"
+#)
+```
+
+```{r}
+#library(ggplot2)
+
+#ggplot(pca_var, aes(x = as.numeric(gsub("PC", "", PC)), y = Proportion_Variance)) +
+#  geom_point() +
+#  geom_line() +
+#  labs(
+#    title = "Figure Y: Scree Plot for Environmental PCA",
+#    x = "Principal Component",
+#    y = "Proportion of Variance Explained"
+#  ) +
+#  theme_minimal()
+```
+
+```{r}
+#pca_scores <- as.data.frame(pca_env$x[, 1:3])
+#colnames(pca_scores) <- c("PC1_env", "PC2_env", "PC3_env")
+
+#main_data_pca <- main_data %>%
+#  bind_cols(pca_scores)
+```
+
+```{r}
+#main_data_pca <- main_data_pca %>%
+#  mutate(
+#    marathon = factor(marathon),
+#    gender = factor(gender),
+#    subgroup = factor(subgroup),
+#    supershoe = factor(supershoe)
+#  )
+```
+
+```{r}
+#set.seed(123)
+
+#train_index <- sample(1:nrow(main_data_pca), size = 0.9 * nrow(main_data_pca))
+
+#train_data <- main_data_pca[train_index, ]
+#test_data  <- main_data_pca[-train_index, ]
 ```
 
 ```{r}
