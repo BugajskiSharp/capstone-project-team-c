@@ -161,9 +161,25 @@ str(main_data)
 
 ```
 
-# Data Scaling (for linear regression model)
+Adding the best two bins:
+```{r}
+# ozone bin: 0 = low, 1 = high
+main_data$ozone_bin <- ifelse(main_data$ozone >= 38, 1, 0)
+
+# pm25 bin: 0 = low, 1 = high
+main_data$pm25_bin <- ifelse(main_data$pm25 >= 54, 1, 0)
+
+# convert to factors
+main_data$ozone_bin <- factor(main_data$ozone_bin, levels = c(0, 1))
+main_data$pm25_bin  <- factor(main_data$pm25_bin,  levels = c(0, 1))
+
+```
+
 
 ```{r}
+# Data Scaling (for linear regression model)
+
+
 # Identify numeric predictors to scale (exclude outcome and identifiers)
 numeric_vars <- main_data %>%
   select(where(is.numeric)) %>%
