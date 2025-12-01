@@ -13,6 +13,7 @@ library(tidyr)
 library(ggplot2)
 library(corrplot)
 library(VIM)
+library(readr)
 ```
 
 Import data (KB)
@@ -170,33 +171,11 @@ str(main_data)
 Now we have a dataset that has 770 obs. and only 19 variables after the addition of newly engineered features and removal if highly correlated features. 
 
 
-# Data Scaling (for linear regression model): (ZD, KB)
+Export final prepossessing data to csv; undo and add the `#` before and after saving the main_data file (KB)
 ```{r}
-# Identify numeric predictors to scale (exclude outcome and identifiers)
-numeric_vars <- main_data %>%
-  select(where(is.numeric)) %>%
-  select(-avg_chip_seconds, -year, -n) %>%
-  names()
-
-# Create scaled versions of the numeric predictors (scaled variables with "scaled_")
-scaled_vars <- paste0("scaled_", numeric_vars)
-main_data[scaled_vars] <- scale(main_data[numeric_vars])
-
-# summary of scaled variables
-summary(main_data[scaled_vars])
+#write_csv(main_data, "pre_feat_data.csv")
 ```
-We can see that all the continuous variables, not including the identifying variables `year` and `n`, were successfully scaled with means at 0 and standard deviations of 1, showing that the standardization was correctly applied.
 
-# Add our 90/10 training/test split (ZD)
-```{r}
-# split data into train and test
-set.seed(123)
-
-train_index <- sample(1:nrow(main_data), size = 0.9 * nrow(main_data)) # use a 90/10 split
-
-train_data <- main_data[train_index, ]
-test_data  <- main_data[-train_index, ]
-```
 
 
 ------------------------
