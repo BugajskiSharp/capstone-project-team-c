@@ -339,7 +339,7 @@ knitr::kable(
   caption = "Model Comparison Across All Subsets of Predictors"
 )
 ```
-Final Model Results Above
+Initial Modeling Results Above
 
 
 
@@ -529,3 +529,4 @@ rf_rmse
 rf_r2
 
 ```
+
