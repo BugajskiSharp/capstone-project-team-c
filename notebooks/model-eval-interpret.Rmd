@@ -1,0 +1,374 @@
+---
+title: "Model Eval and Interpretation"
+author: "Zachary D'Urso"
+date: "2025-12-04"
+output: html_document
+---
+
+# Load libraries
+```{r}
+library(here)
+library(dplyr)
+library(knitr)
+library(tidyr)
+library(ggplot2)
+library(corrplot)
+library(VIM)
+library(combinat)
+```
+
+# Importing the data (KB)
+```{r}
+main_data <- read.csv(here("data", "pre_feat_data.csv"))
+```
+
+Make sure marathon, gender,subgroup, and supershoe are all factors (KB)
+```{r}
+main_data$supershoe <- factor(main_data$supershoe)
+main_data$marathon <- factor(main_data$marathon)
+main_data$gender   <- factor(main_data$gender)
+main_data$subgroup <- factor(main_data$subgroup)
+
+str(main_data)
+```
+Now all characters are factors ready for modeling. 
+
+# Add our 90/10 training/test split (ZD)
+```{r}
+# split data into train and test
+set.seed(123)
+
+train_index <- sample(1:nrow(main_data), size = 0.9 * nrow(main_data)) # use a 90/10 split
+
+train_data <- main_data[train_index, ]
+test_data  <- main_data[-train_index, ]
+```
+
+
+# Data Scaling (for linear regression model): (ZD, KB)
+
+```{r}
+# Identify numeric predictors to scale (exclude outcome and identifiers)
+numeric_vars <- train_data %>%
+  select(where(is.numeric)) %>%
+  select(-avg_chip_seconds, -year, -n) %>%
+  names()
+
+# scale training data and save scaling parameters
+train_scaled <- scale(train_data[numeric_vars])
+train_data[paste0("scaled_", numeric_vars)] <- train_scaled
+
+train_center <- attr(train_scaled, "scaled:center")
+train_scale  <- attr(train_scaled, "scaled:scale")
+
+# scale test data using training parameters
+test_scaled <- scale(test_data[numeric_vars],
+                     center = train_center,
+                     scale  = train_scale)
+test_data[paste0("scaled_", numeric_vars)] <- test_scaled
+
+
+summary(train_data[paste0("scaled_", numeric_vars)])
+
+```
+
+
+```{r}
+summary(test_data[paste0("scaled_", numeric_vars)])
+```
+
+
+We can see that all the continuous variables for the train and test data, not including the identifying variables `year` and `n`, were successfully scaled with means at 0 and standard deviations of 1, showing that the standardization was correctly applied.
+
+# Adding Binned features based off Decision Tree (ozone_bin and pm25_bin) (KB)
+```{r}
+# Training data 
+train_data$ozone_bin <- factor(ifelse(train_data$ozone >= 38, 1, 0), levels = c(0, 1))
+train_data$pm25_bin  <- factor(ifelse(train_data$pm25 >= 54, 1, 0), levels = c(0, 1))
+
+# Test data using same thresholds
+test_data$ozone_bin <- factor(ifelse(test_data$ozone >= 38, 1, 0), levels = c(0, 1))
+test_data$pm25_bin  <- factor(ifelse(test_data$pm25 >= 54, 1, 0), levels = c(0, 1))
+```
+
+We made the factor levels:  
+- ozone bin: 0 = low, 1 = high
+- pm25 bin: 0 = low, 1 = high
+
+
+```{r}
+str(train_data)
+```
+
+
+
+# LASSO is being used to answer the following question: (KB)
+
+Which version of the air-quality and temperature features should we keep for the final model?
+```{r}
+library(glmnet)
+
+# Prepare the predictor matrix (x) and outcome vector (y)
+# Only using ozone and PM2.5 (continuous and binned)
+x_train <- model.matrix(avg_chip_seconds ~ scaled_ozone + scaled_pm25 + 
+                        ozone_bin + pm25_bin, data = train_data)[,-1]  # remove intercept
+y_train <- train_data$avg_chip_seconds
+
+x_test <- model.matrix(avg_chip_seconds ~ scaled_ozone + scaled_pm25 + 
+                       ozone_bin + pm25_bin, data = test_data)[,-1]
+y_test <- test_data$avg_chip_seconds
+
+# Run LASSO with cross-validation to select lambda
+set.seed(123)
+lasso_cv <- cv.glmnet(x_train, y_train, alpha = 1, standardize = FALSE)  # already scaled
+
+# Find the best lambda
+best_lambda <- lasso_cv$lambda.min
+best_lambda
+
+# Fit final LASSO model at best lambda
+lasso_model <- glmnet(x_train, y_train, alpha = 1, lambda = best_lambda, standardize = FALSE)
+
+# Check coefficients
+coef(lasso_model)
+
+# Predict on test set
+preds <- predict(lasso_model, newx = x_test)
+
+# Evaluate performance
+rmse <- sqrt(mean((y_test - preds)^2))
+mae  <- mean(abs(y_test - preds))
+rmse
+mae
+
+```
+
+
+We can see that both binned features and scaled_pm25 were retained showing (.). We can also see that scaled_ozone shrank to 0, which means it did not contribute to the predicting average chip time once the binned values were also included. The model achieved an RMSE of 3383 seconds and a MAE of 2861 seconds, suggesting that good predictive performance. 
+
+Removing ozone based on LASSO results (KB)
+```{r}
+# Remove scaled_ozone from training and test data
+train_data <- train_data[, !(names(train_data) %in% c("scaled_ozone"))]
+test_data  <- test_data[, !(names(test_data) %in% c("scaled_ozone"))]
+
+str(train_data)
+str(test_data)
+```
+
+We can see that scaled ozone was successfully removed from both train and test data. 
+
+
+
+
+
+
+(I ENDED HERE... I made the pre-feat-data into a csv and added the scaling and adding bins above)
+
+
+```{r}
+#Initial Model (MH)
+lm_initial_scaledPM25 <- lm(avg_chip_seconds ~ marathon + gender + subgroup + supershoe + scaled_avg_temp + scaled_precipitation + scaled_dew_point + scaled_wind_speed + scaled_visibility + scaled_sea_level_pressure + scaled_co + scaled_pm25 + ozone_bin + scaled_no2 + scaled_temp_aqi_interaction + scaled_avg_temp_gender_interaction, data = train_data)
+
+
+summary(lm_initial_scaledPM25)
+plot(lm_initial_scaledPM25)
+
+lm_initial_PM25bin <- lm(avg_chip_seconds ~ marathon + gender + subgroup + supershoe + scaled_avg_temp + scaled_precipitation + scaled_dew_point + scaled_wind_speed + scaled_visibility + scaled_sea_level_pressure + scaled_co + pm25_bin + ozone_bin + scaled_no2 + scaled_temp_aqi_interaction + scaled_avg_temp_gender_interaction, data = train_data)
+
+
+summary(lm_initial_PM25bin)
+plot(lm_initial_PM25bin)
+
+```
+
+```{r}
+#Adding RMSE and MAE for looking at overfitting with test results below (MH/ZD)
+residuals_lm_initial_PM25bin <- lm_initial_PM25bin$residuals
+residuals_lm_initial_PM25bin_rmse <- sqrt(mean(residuals_lm_initial_PM25bin^2))
+residuals_lm_initial_PM25bin_mae <- mean(abs(residuals_lm_initial_PM25bin))
+
+residuals_lm_initial_scaledPM25 <- lm_initial_scaledPM25$residuals
+residuals_lm_initial_scaledPM25_rmse <- sqrt(mean(residuals_lm_initial_scaledPM25^2))
+residuals_lm_initial_scaledPM25_mae <- mean(abs(residuals_lm_initial_scaledPM25))
+
+
+
+model_compare_train <- data.frame(
+  Model = c("Continuous PM2.5", "PM2.5 Bin"),
+  RMSE  = c(residuals_lm_initial_scaledPM25_rmse,
+            residuals_lm_initial_PM25bin_rmse),
+  MAE   = c(residuals_lm_initial_scaledPM25_mae,
+            residuals_lm_initial_PM25bin_mae),
+  R2    = c(summary(lm_initial_scaledPM25)$r.squared,
+            summary(lm_initial_PM25bin)$r.squared)
+)
+
+# Display nicely formatted table
+knitr::kable(model_compare_train, digits = 4,
+             caption = "Training Data Comparison: Continuous vs Binned PM2.5")
+
+```
+
+
+
+
+
+```{r}
+# More Modeling (ZD)
+
+# build a function
+evaluate <- function(model, test_data) {
+  preds <- predict(model, newdata = test_data)
+  actual <- test_data$avg_chip_seconds
+  
+  rmse <- sqrt(mean((preds - actual)^2))
+  mae  <- mean(abs(preds - actual))
+  r2   <- cor(preds, actual)^2
+  
+  return(list(RMSE = rmse, MAE = mae, R2 = r2))
+}
+
+# Evaluate Model 1 with scaled PM2.5
+results_scaledPM25 <- evaluate(lm_initial_scaledPM25, test_data)
+
+# Evaluate Model 2 with PM2.5 bin
+results_PM25bin <- evaluate(lm_initial_PM25bin, test_data)
+```
+
+```{r}
+# compare results (ZD)
+model_compare <- data.frame(
+  Model = c("Continuous PM2.5", "PM2.5 Bin"),
+  RMSE = c(results_scaledPM25$RMSE, results_PM25bin$RMSE),
+  MAE  = c(results_scaledPM25$MAE,  results_PM25bin$MAE),
+  R2   = c(results_scaledPM25$R2,   results_PM25bin$R2)
+)
+
+knitr::kable(model_compare, digits = 4,
+             caption = "Comparison of Initial Models: Continuous vs Binned PM2.5")
+```
+
+```{r}
+# build residual plots (ZD)
+plot(lm_initial_PM25bin, which = 1)   # Residuals vs Fitted
+plot(lm_initial_PM25bin, which = 2)   # Q–Q plot
+```
+
+
+
+
+
+
+
+
+
+Start of Model Evaluation and Interpretation section:
+(Attempt)
+
+```{r}
+# Remove identifiers before creating model matrix
+# Convert dataset to numeric-only matrix
+train_matrix <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = train_data %>% select(-year, -n)
+)
+
+test_matrix <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = test_data %>% select(-year, -n)
+)
+
+# Convert to DMatrix format for tuning, needed for cross validation
+dtrain <- xgb.DMatrix(data = train_matrix, label = train_data$avg_chip_seconds)
+dtest  <- xgb.DMatrix(data = test_matrix,  label = test_data$avg_chip_seconds)
+```
+
+```{r}
+# Create an untuned XGBoost model
+xgb_base <- xgboost(
+  data = dtrain,
+  nrounds = 200,
+  objective = "reg:squarederror",
+  verbose = FALSE # mute iterations
+)
+
+pred_xgb <- predict(xgb_base, dtest)
+
+rmse_xgb <- rmse(test_data$avg_chip_seconds, pred_xgb)
+mae_xgb  <- mae(test_data$avg_chip_seconds, pred_xgb)
+
+c(RMSE = rmse_xgb, MAE = mae_xgb)
+```
+
+```{r}
+# Introduce cross validation hyperparameter tuning
+xgb_cv <- xgb.cv(
+  data = dtrain,
+  nrounds = 2000,
+  nfold = 5,
+  objective = "reg:squarederror",
+  eta = 0.01,
+  max_depth = 4,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  early_stopping_rounds = 50,
+  verbose = 0 # mute iterations
+)
+
+xgb_cv$best_iteration
+```
+
+```{r}
+# Train tuned model
+params <- list(
+  objective = "reg:squarederror",
+  eta = 0.01,
+  max_depth = 4,
+  subsample = 0.8,
+  colsample_bytree = 0.8
+)
+# Find best # of trees from cv
+best_xgb <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = xgb_cv$best_iteration
+)
+```
+
+
+```{r}
+# Evaluate tuned model
+pred_best <- predict(best_xgb, dtest)
+
+rmse_best <- rmse(test_data$avg_chip_seconds, pred_best)
+mae_best  <- mae(test_data$avg_chip_seconds, pred_best)
+
+c(RMSE = rmse_best, MAE = mae_best)
+```
+
+```{r}
+# Variable importance amongst XGBoosted model
+importance <- xgb.importance(model = best_xgb)
+print(importance)
+
+xgb.plot.importance(importance)
+```
+
+```{r}
+# Overfitting?
+cv_rmse <- min(xgb_cv$evaluation_log$test_rmse_mean)
+train_rmse <- min(xgb_cv$evaluation_log$train_rmse_mean)
+
+data.frame(
+  Train_RMSE = train_rmse,
+  CV_RMSE = cv_rmse,
+  Test_RMSE = rmse_best
+)
+```
+
+
+- Initial attempt end
+
+
+
