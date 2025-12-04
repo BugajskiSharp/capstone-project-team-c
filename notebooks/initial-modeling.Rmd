@@ -180,7 +180,35 @@ plot(lm_initial_PM25bin)
 
 ```
 
-I am unable to get the code below to work, so I ran a couple basic lm()s above with the features listed out
+```{r}
+#Adding RMSE and MAE for looking at overfitting with test results below (MH/ZD)
+residuals_lm_initial_PM25bin <- lm_initial_PM25bin$residuals
+residuals_lm_initial_PM25bin_rmse <- sqrt(mean(residuals_lm_initial_PM25bin^2))
+residuals_lm_initial_PM25bin_mae <- mean(abs(residuals_lm_initial_PM25bin))
+
+residuals_lm_initial_scaledPM25 <- lm_initial_scaledPM25$residuals
+residuals_lm_initial_scaledPM25_rmse <- sqrt(mean(residuals_lm_initial_scaledPM25^2))
+residuals_lm_initial_scaledPM25_mae <- mean(abs(residuals_lm_initial_scaledPM25))
+
+
+
+model_compare_train <- data.frame(
+  Model = c("Continuous PM2.5", "PM2.5 Bin"),
+  RMSE  = c(residuals_lm_initial_scaledPM25_rmse,
+            residuals_lm_initial_PM25bin_rmse),
+  MAE   = c(residuals_lm_initial_scaledPM25_mae,
+            residuals_lm_initial_PM25bin_mae),
+  R2    = c(summary(lm_initial_scaledPM25)$r.squared,
+            summary(lm_initial_PM25bin)$r.squared)
+)
+
+# Display nicely formatted table
+knitr::kable(model_compare_train, digits = 4,
+             caption = "Training Data Comparison: Continuous vs Binned PM2.5")
+
+```
+
+
 
 
 
