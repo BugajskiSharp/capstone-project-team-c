@@ -15,6 +15,8 @@ library(ggplot2)
 library(corrplot)
 library(VIM)
 library(combinat)
+library(xgboost)
+library(Metrics)
 ```
 
 # Importing the data (KB)
@@ -372,5 +374,192 @@ data.frame(
 
 
 
+
+
+
+# XGBoost model with no feature engineering or binning: (KB)
+Tree-based models naturally capture nonlinearities and interactions without requiring us to create them. This could help us validate whether the interactions we hand-selected align with the patterns the model finds.
+
+We will use the preprocessed dataset (cleaned, imputed, encoded. However, we will remove engineered interactions and bins when training XGBoost.
+
+Import data (KB)
+```{r}
+final_data <- read.csv(here("data", "merged_marathon_data.csv"))
+```
+
+Spit the data so Berlin is used as a second case study to show how the method performs with missing data (whether successful or not). (KB)
+```{r}
+main_data <- final_data %>% filter(marathon != "Berlin")
+berlin_data <- final_data %>% filter(marathon == "Berlin")
+
+str(main_data)
+```
+We can see the main_data with out berlin now has 770 obs. and 21 variables. 
+
+Since PM10 has a lot of missing values still, we will drop that column completely: (KB)
+```{r}
+main_data <- main_data %>%
+  select(-pm10) 
+```
+
+
+Since PM2.5 is often the main pollutant, we decided to use KNN imputation to fill missing PM2.5 values because it predicts missing data using similar rows without assuming a specific parametric relationship, preserves variance, and works well for our relatively small dataset while using correlations with other environmental variables: (KB)
+```{r}
+# Impute missing PM2.5 values using 5 nearest neighbors
+main_data <- kNN(main_data, variable = "pm25", k = 5) # can change later to see which K gives best model performance 
+
+# remove pm25_imp
+cols_to_remove <- c(
+  "pm25_imp"
+)
+
+main_data <- main_data[, !(names(main_data) %in% cols_to_remove)]
+
+# Check that missing values are filled
+summary(main_data$pm25)
+```
+We can see that there are no missing values now and we can get a clean summary of the data. 
+
+Convert categorical variables to factors: (KB)
+```{r}
+main_data  <- main_data  %>%
+  mutate(subgroup = factor(subgroup),
+         gender = factor(gender),
+         marathon = factor(marathon),
+         main_pollutant = factor(main_pollutant))
+
+str(main_data )
+```
+We can see that the identifiers (subgroup, gender, marathon) and predictor (main_pollutant) were all converted to factors so that our models can properly recognized them. 
+
+Add our 90/10 training/test split (ZD, KB)
+```{r}
+# split data into train and test
+set.seed(123)
+
+train_index <- sample(1:nrow(main_data), size = 0.9 * nrow(main_data)) # use a 90/10 split
+
+train_data_raw <- as.data.frame(main_data[train_index, ]) # making sure they are data frames
+test_data_raw  <- as.data.frame(main_data[-train_index, ])
+```
+
+(ZD, KB)
+```{r}
+# Remove identifiers before creating model matrix
+# Convert dataset to numeric-only matrix
+train_matrix_raw <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = train_data_raw %>% select(-year, -n)
+)
+
+test_matrix_raw <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = test_data_raw %>% select(-year, -n)
+)
+
+# Convert to DMatrix format for tuning, needed for cross validation
+dtrain_raw <- xgb.DMatrix(data = train_matrix_raw, label = train_data_raw$avg_chip_seconds)
+dtest_raw  <- xgb.DMatrix(data = test_matrix_raw,  label = test_data_raw$avg_chip_seconds)
+```
+
+Creating the XGBoost Model(ZD, KB) 
+```{r}
+# Create an untuned XGBoost model
+xgb_base_raw <- xgboost(
+  data = dtrain_raw,
+  nrounds = 200,
+  objective = "reg:squarederror",
+  verbose = FALSE # mute iterations
+)
+
+pred_xgb_raw <- predict(xgb_base_raw, dtest_raw)
+
+rmse_xgb_raw <- rmse(test_data_raw$avg_chip_seconds, pred_xgb_raw)
+mae_xgb_raw  <- mae(test_data_raw$avg_chip_seconds, pred_xgb_raw)
+
+c(RMSE = rmse_xgb_raw, MAE = mae_xgb_raw)
+```
+We can see that without manual feature engineering or creating binned variables (where the model showed previously RMSE: 131.9877 and MAE: 101.7843),the XGBoost model achieves lower RMSE and MAE. This suggests that XGBoost is effectively capturing nonlinearities and interactions on its own, reducing the need for us to manually create them.
+
+Introduce cross validation hyperparameter tuning (ZD, KB)
+```{r}
+set.seed(123)  # for reproducibility
+
+xgb_cv_raw <- xgb.cv(
+  data = dtrain_raw,
+  nrounds = 5000,      # Reduced nrounds from 2000 to speed up training while still allowing enough trees
+  eta = 0.05,          # Increased eta from 0.01 to allow faster learning and reduce the number of trees needed
+  nfold = 5,
+  objective = "reg:squarederror",
+  max_depth = 4,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  early_stopping_rounds = 50,
+  verbose = 0, # mute iterations
+  seed = 123  # fixes XGBoost internal randomness
+)
+
+xgb_cv_raw$best_iteration
+```
+We can see that the XGBoost model performed best at 4124 trees according to cross-validation. 
+Adding more trees didn’t improve validation error.
+
+Training the tunned model: (ZD, KB)
+```{r}
+# Train tuned model
+params_raw <- list(
+  objective = "reg:squarederror",
+  eta = 0.05,          # matched the eta used in CV
+  max_depth = 4,
+  subsample = 0.8,
+  colsample_bytree = 0.8
+)
+
+# Find best # of trees from cv
+best_xgb_raw <- xgb.train(
+  params = params_raw,
+  data = dtrain_raw,
+  nrounds = xgb_cv_raw$best_iteration,  # 4124 
+  verbose = 0
+)
+```
+
+Next we will evaluate tge tuned model on the test set (ZD, KB)
+```{r}
+# Evaluate tuned model
+pred_best_raw <- predict(best_xgb_raw, dtest_raw)
+
+rmse_best_raw <- rmse(test_data_raw$avg_chip_seconds, pred_best_raw)
+mae_best_raw  <- mae(test_data_raw$avg_chip_seconds, pred_best_raw)
+
+c(RMSE = rmse_best_raw, MAE = mae_best_raw)
+
+```
+We can see the same trend on the test set (where the feature engineered and binned GXBoost showed RMSE: 128.51255 and MAE: 98.61524). This XGBoost model achieves lower RMSE and MAE. This suggests that XGBoost is effectively capturing nonlinearities and interactions on its own, reducing the need for us to manually create them.
+
+Find Variable importance amongst XGBoost model, so we can see how it compares to the GXBoost that incudes feature enginnering and binning (ZD, KB)
+```{r}
+# Variable importance
+importance_raw <- xgb.importance(model = best_xgb_raw)
+print(importance_raw)
+
+xgb.plot.importance(importance_raw)
+```
+We can see that subgroupslow and subgroupelite are the features the model relied on most to reduce prediction error. Variables like wind_speed or low_temp are less influential but still contribute a little. Features with extremely low Gain and Frequency, like main_pollutantPM10, are barely used by the model. 
+
+
+Check for overfitting (ZD, KB)
+```{r}
+# Overfitting?
+cv_rmse_raw <- min(xgb_cv_raw$evaluation_log$test_rmse_mean)
+train_rmse_raw <- min(xgb_cv_raw$evaluation_log$train_rmse_mean)
+
+data.frame(
+  Train_RMSE = train_rmse_raw,
+  CV_RMSE    = cv_rmse_raw,
+  Test_RMSE  = rmse_best_raw
+)
+```
+We can see that the model is overfitting: There is a huge gap between Train_RMSE (15.07) and CV_RMSE (159.69) which means the model is overfitting the training data.
 
 
