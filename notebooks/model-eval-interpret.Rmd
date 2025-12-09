@@ -707,6 +707,15 @@ knitr::kable(model_compare_train, digits = 4,
 ```
 
 
+# Looking at our Predictions: (KB)
+
+These results from the XGBoost (raw-features) model will help answer our predictions. 
+```{r}
+importance_raw <- xgb.importance(model = best_xgb_raw)
+importance_raw
+```
+
+
 
 #Graphing gain, cover and frequency for best XGBoost (MH)
 
