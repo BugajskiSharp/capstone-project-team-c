@@ -708,6 +708,55 @@ knitr::kable(model_compare_train, digits = 4,
 
 
 
+#Graphing gain, cover and frequency for best XGBoost (MH)
+
+```{r}
+# Variable importance
+gain_fig_xgb <- xgb.plot.importance(importance_raw, measure ="Gain") 
+cover_fig_xgb <- xgb.plot.importance(importance_raw, measure ="Cover") 
+freq_fig_xgb <- xgb.plot.importance(importance_raw, measure ="Frequency")
+
+
+#Used ai since I couldn't figure out how to add labels to the xgb.plot.importance() function
+gain_fig <- ggplot(importance_raw, aes(x = reorder(Feature, Gain), y = Gain)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance by Gain",
+    x = "Feature",
+    y = "Importance Score"
+  ) +
+  theme_minimal()
+
+print(gain_fig)
+
+
+cover_fig <- ggplot(importance_raw, aes(x = reorder(Feature, Cover), y = Cover)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance by Cover",
+    x = "Feature",
+    y = "Importance Score"
+  ) +
+  theme_minimal()
+
+print(cover_fig)
+
+ 
+freq_fig <- ggplot(importance_raw, aes(x = reorder(Feature, Cover), y = Frequency)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance by Frequency",
+    x = "Feature",
+    y = "Importance Score"
+  ) +
+  theme_minimal()
+
+print(freq_fig)
+
+```
 
 
 
