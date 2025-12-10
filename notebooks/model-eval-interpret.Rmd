@@ -838,7 +838,7 @@ ggplot(gender_points, aes(x = x_feature, y = value, color = color_value)) +
     values = c("Female" = "#E69F00", "Male" = "#0072B2")
   ) +
   labs(
-    x = "avg_temp",
+    x = "Average Temp",
     y = "SHAP value",
     color = "Gender"
   ) +
@@ -916,6 +916,72 @@ ggplot(all_points, aes(x = x_feature, y = value, color = group)) +
 ```
 
 
+```{r}
+#plot for elite subgroup
+elite <- shap.plot.dependence(
+  shap_long,
+  x = "ozone",
+  color_feature = "subgroupelite"
+)
+#SHAP values broken down by 1 (elite) or 0 (not-elite) and relevant color.
+elite_points <- elite$data
+
+#repeated for competitive subgroup
+comp <- shap.plot.dependence(
+  shap_long,
+  x = "ozone",
+  color_feature = "subgroupcompetitive"
+)
+comp_points <- comp$data
+
+#repeated for recreational subgroup
+rec <- shap.plot.dependence(
+  shap_long,
+  x = "ozone",
+  color_feature = "subgrouprecreational"
+)
+rec_points <- rec$data
+
+#repeated for slow subgroup
+slow <- shap.plot.dependence(
+  shap_long,
+  x = "ozone",
+  color_feature = "subgroupslow"
+)
+slow_points <- slow$data
+
+
+
+#subset so each dataset hase color_value = 1 (the dataframe's positive subroup)
+elite_points <- subset(elite_points, color_value == 1)
+comp_points <- subset(comp_points, color_value == 1)
+rec_points <- subset(rec_points, color_value == 1)
+slow_points <- subset(slow_points, color_value == 1)
+
+#add group to each dataframe for merge
+elite_points$group <- "Elite"
+comp_points$group  <- "Comp"
+rec_points$group   <- "Rec"
+slow_points$group  <- "Slow"
+
+#merge
+all_points <- rbind(elite_points, comp_points, rec_points, slow_points)
+
+#plot each subgroup and relevant SHAP values
+ggplot(all_points, aes(x = x_feature, y = value, color = group)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(se = FALSE, size = 0.8) +   # one smooth line per group
+  scale_color_manual(values = c(
+    "Elite" = "#3B77BC",
+    "Comp"  = "#E1BE6A",
+    "Rec"   = "#55A868",
+    "Slow"  = "#C44E52"
+  ),
+  breaks = c("Elite", "Comp", "Rec", "Slow") 
+  ) +
+  theme_minimal() +
+  labs(x = "Ozone", y = "SHAP value", color = "Group")
+```
 
 
 Temperature displays a much clearer impact than the PM2.5 results. At lower temperatures, the SHAP values are negative and ultimately predict a faster finishing time. At moderate temperatures, the effects are rather neutral. At higher temperatures, the SHAP values begin to rise, indicating a slower predicted finish. While extremely warm temperatures the SHAP values sharply increase the predicted finishing time by a rough average of 400 seconds. Generally speaking, colder temperatures appear to improve race time while warmer temperatures hinder race time.
