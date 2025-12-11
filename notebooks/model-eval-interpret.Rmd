@@ -412,6 +412,40 @@ knitr::kable(model_compare, digits = 4,
 We can see that the RMSE and MAE are alot lower comapred to our baseline models, where Continuous PM2.5	RMSE :357.0011	and MAE: 267.278, and PM2.5 Bin	RMSE: 358.0687	and MAE:274.0892. 
 
 
+
+
+#Double checking evaluation of test set
+```{r}
+#used best_xgb instead of xgb_base for predict
+pred_xgb_eng <- predict(best_xgb, dtest)
+
+rmse_xgb_eng <- rmse(test_data$avg_chip_seconds, pred_xgb_eng)
+mae_xgb_eng  <- mae(test_data$avg_chip_seconds, pred_xgb_eng)
+
+c(RMSE = rmse_xgb_eng, MAE = mae_xgb_eng)
+
+
+
+#Calculating R2
+rss <- sum((test_data$avg_chip_seconds - pred_xgb_eng)^2)
+tss <- sum((test_data$avg_chip_seconds - mean(test_data$avg_chip_seconds))^2)
+r2_xgb <- 1 - rss/tss
+
+# XGBoost model comparison (ZD, KB)
+model_compare <- data.frame(
+  Model = c("XGBoost (with engineering)"),
+  RMSE = c(rmse_xgb_eng),
+  MAE  = c(mae_xgb_eng),
+  R2   = c(r2_xgb)
+)
+
+knitr::kable(model_compare, digits = 4,
+             caption = "XGBoost (with engineering)")
+
+```
+
+
+
 ```{r}
 # Variable importance amongst XGBoosted model
 importance <- xgb.importance(model = best_xgb)
@@ -654,6 +688,41 @@ knitr::kable(model_compare, digits = 4,
 ```
 
 We can see the same trend on the test set (where XGBoost with feature engineering showed RMSE: 131.9877 and MAE: 101.7843). This XGBoost model achieves lower RMSE and MAE. This suggests that XGBoost is effectively capturing nonlinearities and interactions on its own, reducing the need for us to manually create them.
+
+#Double checking evaluation of test set
+```{r}
+#used best_xgb_raw instead of xgb_base for predict
+pred_xgb_raw_best <- predict(best_xgb_raw, dtest_raw)
+
+rmse_xgb_raw <- rmse(test_data_raw$avg_chip_seconds, pred_xgb_raw_best)
+mae_xgb_raw  <- mae(test_data_raw$avg_chip_seconds, pred_xgb_raw_best)
+
+c(RMSE = rmse_xgb_raw, MAE = mae_xgb_raw)
+
+
+
+#Calculating R2
+rss <- sum((test_data_raw$avg_chip_seconds - pred_xgb_raw_best)^2)
+tss <- sum((test_data_raw$avg_chip_seconds - mean(test_data_raw$avg_chip_seconds))^2)
+r2_xgb_raw <- 1 - rss/tss
+
+# XGBoost model comparison (ZD, KB)
+model_compare <- data.frame(
+  Model = c("XGBoost (raw features)"),
+  RMSE = c(rmse_xgb_raw),
+  MAE  = c(mae_xgb_raw),
+  R2   = c(r2_xgb_raw)
+)
+
+knitr::kable(model_compare, digits = 4,
+             caption = " XGBoost (raw features)")
+
+
+```
+
+
+
+
 
 Find Variable importance amongst XGBoost model, so we can see how it compares to the XGBoost that incudes feature enginnering and binning (ZD, KB)
 ```{r}
