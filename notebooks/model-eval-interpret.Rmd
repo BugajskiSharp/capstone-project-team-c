@@ -50,35 +50,35 @@ test_data  <- main_data[-train_index, ]
 
 # Data Scaling (for linear regression model): (ZD, KB)
 
-```{r}
+#```{r}
 # Identify numeric predictors to scale (exclude outcome and identifiers)
-numeric_vars <- train_data %>%
-  select(where(is.numeric)) %>%
-  select(-avg_chip_seconds, -year, -n) %>%
-  names()
+#numeric_vars <- train_data %>%
+#  select(where(is.numeric)) %>%
+#  select(-avg_chip_seconds, -year, -n) %>%
+#  names()
 
 # scale training data and save scaling parameters
-train_scaled <- scale(train_data[numeric_vars])
-train_data[paste0("scaled_", numeric_vars)] <- train_scaled
+#train_scaled <- scale(train_data[numeric_vars])
+#train_data[paste0("scaled_", numeric_vars)] <- train_scaled
 
-train_center <- attr(train_scaled, "scaled:center")
-train_scale  <- attr(train_scaled, "scaled:scale")
+#train_center <- attr(train_scaled, "scaled:center")
+#train_scale  <- attr(train_scaled, "scaled:scale")
 
 # scale test data using training parameters
-test_scaled <- scale(test_data[numeric_vars],
-                     center = train_center,
-                     scale  = train_scale)
-test_data[paste0("scaled_", numeric_vars)] <- test_scaled
+#test_scaled <- scale(test_data[numeric_vars],
+#                     center = train_center,
+#                     scale  = train_scale)
+#test_data[paste0("scaled_", numeric_vars)] <- test_scaled
 
 
-summary(train_data[paste0("scaled_", numeric_vars)])
+#summary(train_data[paste0("scaled_", numeric_vars)])
 
-```
+#```
 
 
-```{r}
-summary(test_data[paste0("scaled_", numeric_vars)])
-```
+#```{r}
+#summary(test_data[paste0("scaled_", numeric_vars)])
+#```
 
 
 We can see that all the continuous variables for the train and test data, not including the identifying variables `year` and `n`, were successfully scaled with means at 0 and standard deviations of 1, showing that the standardization was correctly applied.
@@ -113,11 +113,11 @@ library(glmnet)
 
 # Prepare the predictor matrix (x) and outcome vector (y)
 # Only using ozone and PM2.5 (continuous and binned)
-x_train <- model.matrix(avg_chip_seconds ~ scaled_ozone + scaled_pm25 + 
+x_train <- model.matrix(avg_chip_seconds ~ ozone + pm25 + 
                         ozone_bin + pm25_bin, data = train_data)[,-1]  # remove intercept
 y_train <- train_data$avg_chip_seconds
 
-x_test <- model.matrix(avg_chip_seconds ~ scaled_ozone + scaled_pm25 + 
+x_test <- model.matrix(avg_chip_seconds ~ ozone + pm25 + 
                        ozone_bin + pm25_bin, data = test_data)[,-1]
 y_test <- test_data$avg_chip_seconds
 
@@ -149,11 +149,12 @@ mae
 
 We can see that both binned features and scaled_pm25 were retained showing (.). We can also see that scaled_ozone shrank to 0, which means it did not contribute to the predicting average chip time once the binned values were also included. The model achieved an RMSE of 3383 seconds and a MAE of 2861 seconds, suggesting that good predictive performance. 
 
-Removing ozone based on LASSO results (KB)
+
+Removing ozone based on LASSO results (KB) *** UPDATE: getting rid of ozone and pm25. keeping bins based on decision tree
 ```{r}
-# Remove scaled_ozone from training and test data
-train_data <- train_data[, !(names(train_data) %in% c("scaled_ozone"))]
-test_data  <- test_data[, !(names(test_data) %in% c("scaled_ozone"))]
+# Remove ozone and pm25 from training and test data
+train_data <- train_data[, !(names(train_data) %in% c("ozone", "pm25"))]
+test_data  <- test_data[, !(names(test_data) %in% c("ozone", "pm25"))]
 
 str(train_data)
 str(test_data)
