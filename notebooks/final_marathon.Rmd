@@ -1,0 +1,2274 @@
+---
+title: "Predicting Marathon Average Finishing Times: *The Impact of Weather and Air Quality on Marathons*"
+author: "**By:** Krisha Bugajski-Sharp, Zachary D’Urso, Meghan Holden"
+date: "**Date:** 12-19-2025"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    theme: flatly
+---
+
+# Load all libraries (KB, ZD, MH)
+```{r}
+library(here)
+library(dplyr)
+library(lubridate)
+library(readr)
+library(tibble)
+library(knitr)
+library(ggplot2)
+library(psych)
+library(tidyr)
+library(corrplot)
+library(gt)
+library(VIM)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(combinat)
+library(glmnet)
+library(xgboost)
+library(Metrics)
+#library(SHAPforxgboost)
+
+```
+
+# Import, clean, and join all raw data (KB)
+```{r}
+weather = read.csv(here("data","raw-data","weather-data.csv"))
+airquality = read.csv(here("data","raw-data","air-quality-data.csv"))
+boston = read.csv(here("data","raw-data","boston-marathon-data.csv"))
+chicago = read.csv(here("data","raw-data","chicago-marathon-data.csv"))
+nyc = read.csv(here("data","raw-data","nyc-marathon-data.csv"))
+berlin = read.csv(here("data","raw-data","berlin-marathon-data.csv"))
+```
+
+Look at the raw datasets (KB)
+```{r}
+str(boston)
+str(berlin)
+str(nyc)
+str(chicago)
+str(weather)
+str(airquality)
+```
+We can see that several of the datasets have varying variable names/formats for year, marathon, gender, and chip_time. We can also see there are variables that are not necessary in several of the marathon datasets.
+
+## Standardize all datasets (KB)
+Standardize all the raw marathon datasets; clean variable names and select necessary variables.
+```{r}
+boston_clean <- boston %>%
+  transmute(
+    year = year,
+    marathon = "Boston",
+    gender = gender,
+    chip_time = official_time
+  )
+
+berlin_clean <- berlin %>%
+  transmute(
+    year = YEAR,
+    marathon = "Berlin",
+    gender = GENDER,
+    chip_time = TIME
+  )
+
+nyc_clean <- nyc %>%
+  transmute(
+    year = Year,
+    marathon = "NYC",
+    gender = Gender,
+    chip_time = Finish.Time
+  )
+
+chicago_clean <- chicago %>%
+  transmute(
+    year = Year,
+    marathon = "Chicago",
+    gender = Gender,
+    chip_time = Finish.Time
+  )
+```
+
+Standardize the raw weather data; format the variables names to make them clean (KB)
+```{r}
+weather_clean <- weather %>%
+  transmute(
+    year = Year,
+    marathon = Marathon,
+    high_temp = High.Temp,
+    low_temp = Low.Temp,
+    avg_temp = Day.Average.Temp,
+    precipitation = Precipitation,
+    dew_point = Average.Dew.Point,
+    wind_speed = Max.Wind.Speed,
+    visibility = Visibility,
+    sea_level_pressure = Sea.Level.Pressure
+  )
+```
+
+Standardize the raw airquality data; format the variables names to make them clean (KB)
+```{r}
+airquality_clean <- airquality %>%
+  transmute(
+    year = Year,
+    marathon = Marathon,
+    aqi = Overall.AQI.Value,
+    main_pollutant = Main.Pollutant,
+    co = as.numeric(CO),
+    ozone = as.numeric(Ozone),
+    pm10 = suppressWarnings(as.numeric(PM10)),
+    pm25 = as.numeric(PM2.5),
+    no2 = as.numeric(NO2)
+  )
+```
+
+## Combine the marathon datasets (KB)
+```{r}
+# using bind_rows so we can row-wise combine and have data for each runner
+marathons_all <- bind_rows(
+  boston_clean,
+  berlin_clean,
+  nyc_clean,
+  chicago_clean
+)
+str(marathons_all)
+```
+We can see that marathons_all contains the identifying variables (*year, marathon, gender*), and the outcome variable *chip_time*.
+
+Select only years we need (1996 to 2025) (KB)
+```{r}
+marathons_all <- marathons_all %>%
+  filter(year >= 1996 & year <= 2025)
+
+unique(marathons_all$year)
+```
+We can that the merged marathon data set now contains years from 1996 to 2023, as most dont have data up to 2025.
+
+## Chip-Time Cleaning Function (KB)
+Need chip_seconds to find the average finishing times (pulled from chatgbt)
+```{r}
+# Cleans and standardizes chip-time values by converting Excel-style numeric
+# times to HH:MM:SS, trimming and formatting text times, replacing invalid 
+# entries with NA, and padding missing leading zeros.
+
+clean_chip_time <- function(x) {
+
+  # Convert numeric Excel-style times to character HH:MM:SS
+  x_numeric <- suppressWarnings(as.numeric(x))
+  is_fraction <- !is.na(x_numeric) & x_numeric < 1 & x_numeric > 0
+  
+  x[is_fraction] <- format(
+    as.POSIXct("1970-01-01", tz = "UTC") + x_numeric[is_fraction] * 86400,
+    "%H:%M:%S"
+  )
+  
+  # Everything else treat as text and clean
+  x <- as.character(x)
+  x <- trimws(x)
+  
+  # Replace known invalid strings with NA
+  invalid <- c("", "NA", "N/A", "—", "-", "DNF", "DNS", "DQ", "no time", "No Time", "NO TIME")
+  x[x %in% invalid] <- NA
+  
+  # Pad missing zeros (H:MM:SS → HH:MM:SS, etc.)
+  x <- gsub("^([0-9]):", "0\\1:", x)
+  x <- gsub(":([0-9]):", ":0\\1:", x)
+  x <- gsub(":([0-9])$", ":0\\1", x)
+  
+  return(x)
+}
+```
+
+Clean chip_time; using `clean_chip_time` function (KB)
+```{r}
+marathons_all <- marathons_all %>%
+  mutate(chip_time_clean = clean_chip_time(chip_time))
+```
+
+Convert the cleaned chip_time values (HH:MM:SS) to hms() and period_to_seconds() and gets a new column chip_seconds (KB)
+```{r}
+marathons_all <- marathons_all %>%
+  mutate(
+    chip_seconds = suppressWarnings(period_to_seconds(hms(chip_time_clean)))
+  )
+
+head(marathons_all)
+```
+We can see `chip_time` with the original data, `chip_time_clean` with the uniform cleaned data across all marathons, and `chip_seconds` with the total time in seconds. 
+
+## Remove missing finish times (KB)
+Need to see what we want to do with these missing values and where they are coming from (KB)
+```{r}
+marathons_all %>% 
+  summarize(missing_finish_times = sum(is.na(chip_seconds)))
+
+marathons_all %>% 
+  filter(is.na(chip_seconds))
+```
+We can see that there are only 3 rows with missing chip_times.
+
+Remove missing finish times. This is safe because we only use average finishing times in our model, so individual missing times do not matter. Also there are only 3 total
+```{r}
+marathons_all <- marathons_all %>%
+  filter(!is.na(chip_seconds))
+```
+
+## Labeling Gender (KB)
+Label as 'male', 'female', or 'unknown', and we decided that nonbinary falls under female.
+```{r}
+# Check all unique names under gender
+unique(marathons_all$gender)
+```
+We can see that there are a lot of ways 'male', 'female', 'nonbinary', and 'unknown' are labled.
+
+Make all the genders uniform and standardized (KB)
+```{r}
+marathons_all <- marathons_all %>%
+  mutate(
+    gender = tolower(gender),
+    gender = case_when(
+      gender %in% c("male", "m") ~ "male",
+      gender %in% c("female", "f", "w", "x", "nonbinary", "nb") ~ "female",
+      TRUE ~ "unknown"
+    )
+  )
+
+table(marathons_all$gender)
+```
+We can see that now we only have three genders, `female`, `male`, and `unknown` which consist of 56 rows.  
+
+Remove unknowns since we have only 56 unknowns, and they will not help the model and most likely add noise: (KB)
+```{r}
+marathons_all <- marathons_all %>% 
+  filter(gender != "unknown")
+
+table(marathons_all$gender)
+```
+We successfully removed the unknowns, leaving us with the desired `female` and `male`. 
+
+## Create Preformance Subgroups (KB)
+Create a variable called winner_time, that consist of the winners or best finishing for that year. Then create a variable called time_ratio (), that consists of chip_seconds / winner_time. 
+```{r}
+# Add winner_time for each marathon-year-gender
+runners <- marathons_all %>%
+  group_by(marathon, year, gender) %>%
+  mutate(winner_time = min(chip_seconds, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(time_ratio = chip_seconds / winner_time)
+```
+
+Create subgroups based on time_ratio. Look at a histogram to adjust the boundaries of the subgroups based on the distribution of the histogram of time_ratio and clear clusters. (KB)
+```{r}
+runners <- runners %>%
+  mutate(
+    subgroup = case_when(
+      time_ratio <= 1.30 ~ "elite",
+      time_ratio > 1.30 & time_ratio <= 1.55 ~ "competitive",
+      time_ratio > 1.55 & time_ratio <= 1.80 ~ "average",
+      time_ratio > 1.80 & time_ratio <= 2.10 ~ "recreational",
+      time_ratio > 2.10 ~ "slow",
+      TRUE ~ NA_character_
+    ),
+    subgroup = factor(subgroup, levels = c("elite", "competitive", "average", "recreational", "slow"))
+  )
+
+# Create histogram of ratio_time amongst male and female runners with boundaries for subgroups in red
+ggplot(runners, aes(x = time_ratio, fill = gender)) +
+  geom_histogram(binwidth = 0.05, position = "dodge") +
+  scale_fill_manual(values = c("female" = "deeppink", "male" = "steelblue")) +
+  geom_vline(xintercept = c(1.3, 1.55, 1.80, 2.10), linetype = "dashed", color = "red") +
+  labs(
+    title = "Distribution of Runner Time Ratios to Winner by Gender",
+    x = "Time Ratio (Runner / Winner)",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+
+
+Looking at the histogram of the time_ratio above, we can see that there is a clear clustering in runner-to-winner time ratios and a long right-skewed tail, which helped with the placement of the performance thresholds/ vertical dashed red lines (1.30, 1.55, 1.80, 2.10). We can also see that the distribution for both male and female follow a similar shape, with overall less female relative male runners. Overall, this figure supports the use of ratio-based performance categories by illustrating natural clustering and skewness in marathon finishing times.
+
+Now we can further divide the subgroups created by genders. (KB)
+```{r}
+runners %>%
+  group_by(gender, subgroup) %>%
+  summarise(count = n()) %>%
+  arrange(gender, subgroup)
+```
+We can see that the subgroups now have groups for `male` and `female`. We can see that the elite groups both has less runners and male runners have more runners in each group overall. We will leave this as is because these cutoffs are not arbitrary, and they follow the natural shape of the data rather than relying on fixed percentile breaks. Weighting could later be applied; however, it is not initially because subgroup effects are not the primary focus.
+
+
+## Compute average finishing time per subgroup (KB)
+```{r}
+avg_times <- runners %>%
+  group_by(marathon, year, gender, subgroup) %>%
+  summarize(
+    n = n(),  # number of runners in each subgroup
+    avg_chip_seconds = mean(chip_seconds, na.rm = TRUE),  
+    .groups = "drop"
+  )
+
+avg_times
+```
+We now have a dataset that contains 1005 rows and 6 columns/ variables. This means that some of the years must be missing for some of the marathon as we know previously when collecting the raw data. Berlin goes from (1996 to 2019), Boston goes from (1996 to 2019), Chicago goes from (1996 to 2023), and NYC goes from (1996 to 2024). Also, after looking through the dataset more, we can see that Berlin is missing data from all female subgroups in 2019 and NYC is missing all male subgroups for 2024. We will leave the data as is because having missing years and genders is not our primary focus, as our focus is on having as much data for finishing/chip times as possible.
+
+## Left join weather and airquality data with marathon datasets (KB)
+```{r}
+final_data <- avg_times %>%
+  left_join(weather_clean, by = c("year", "marathon")) %>%
+  left_join(airquality_clean, by = c("year", "marathon"))
+
+# move n (number of individuals representing each group) to the first column for neatness
+final_data <- final_data %>% 
+  select(n, everything())
+
+final_data
+str(final_data)
+```
+We can see that all the datasets were merged into one final_data successfully. We now have a new column `n` that counts the amount of runners in each group for future computations and potential weighing if needed. 
+
+# EDA Tables and Graphing (KB, ZD, MH)
+
+## Table 1: Continuous Variable Summary (UNKNOWN)
+```{r}
+# Select the continuous variables
+continuous_summary <- final_data %>%
+  select(avg_chip_seconds, high_temp, low_temp, avg_temp, precipitation,
+         dew_point, wind_speed, visibility, sea_level_pressure, aqi, pm10, pm25, no2, ozone, co) %>%
+  summarise_all(list(
+    mean = ~mean(., na.rm = TRUE),
+    median = ~median(., na.rm = TRUE),
+    sd = ~sd(., na.rm = TRUE),
+    min = ~min(., na.rm = TRUE),
+    max = ~max(., na.rm = TRUE)
+  ))
+continuous_summary
+```
+
+## Table 2: Continuous variables summarized by subgroup and gender (UNKNOWN)
+```{r}
+# Select continuous variables
+continuous_summary_grouped <- final_data %>%
+  group_by(gender, subgroup) %>% # group by gender and subgroup
+  summarise(
+    avg_chip_seconds_mean = mean(avg_chip_seconds, na.rm = TRUE),
+    avg_chip_seconds_sd = sd(avg_chip_seconds, na.rm = TRUE),
+    high_temp_mean = mean(high_temp, na.rm = TRUE),
+    high_temp_sd = sd(high_temp, na.rm = TRUE),
+    low_temp_mean = mean(low_temp, na.rm = TRUE),
+    low_temp_sd = sd(low_temp, na.rm = TRUE),
+    avg_temp_mean = mean(avg_temp, na.rm = TRUE),
+    avg_temp_sd = sd(avg_temp, na.rm = TRUE),
+    precipitation_mean = mean(precipitation, na.rm = TRUE),
+    precipitation_sd = sd(precipitation, na.rm = TRUE),
+    dew_point_mean = mean(dew_point, na.rm = TRUE),
+    dew_point_sd = sd(dew_point, na.rm = TRUE),
+    wind_speed_mean = mean(wind_speed, na.rm = TRUE),
+    wind_speed_sd = sd(wind_speed, na.rm = TRUE),
+    visibility_mean = mean(visibility, na.rm = TRUE),
+    visibility_sd = sd(visibility, na.rm = TRUE),
+    sea_level_pressure_mean = mean(sea_level_pressure, na.rm = TRUE),
+    sea_level_pressure_sd = sd(sea_level_pressure, na.rm = TRUE),
+    aqi_mean = mean(aqi, na.rm = TRUE),
+    aqi_sd = sd(aqi, na.rm = TRUE),
+    pm10_mean = mean(pm10, na.rm = TRUE),
+    pm10_sd = sd(pm10, na.rm = TRUE),
+    pm25_mean = mean(pm25, na.rm = TRUE),
+    pm25_sd = sd(pm25, na.rm = TRUE),
+    no2_mean = mean(no2, na.rm = TRUE),
+    no2_sd = sd(no2, na.rm = TRUE),
+    ozone_mean = mean(ozone, na.rm = TRUE),
+    ozone_sd = sd(ozone, na.rm = TRUE),
+    co_mean = mean(co, na.rm = TRUE),
+    co_sd = sd(co, na.rm = TRUE)
+  ) %>%
+  arrange(gender, subgroup)
+continuous_summary_grouped
+```
+
+## Table 3: Countinuous variables overall
+Select the continuous variables to make a clean table: (KB)
+```{r}
+# Select continuous variables
+continuous_vars <- final_data %>% 
+  select(
+    avg_chip_seconds,
+    high_temp,
+    low_temp,
+    avg_temp,
+    dew_point,
+    wind_speed,
+    visibility,
+    sea_level_pressure,
+    aqi,
+    co,
+    ozone,
+    pm10,
+    pm25,
+    no2
+  )
+
+
+str(continuous_vars)
+```
+We can see that there are a total of 14 continuous variables. 
+
+Find Statistics for only the continuous variables: (KB)
+```{r}
+continuous_only <- continuous_vars %>%
+  select(where(is.numeric))
+
+continuous_summary <- describe(continuous_only) %>%
+  as.data.frame() %>%
+  select(
+    mean,
+    sd,
+    median,
+    min,
+    max,
+    skew,
+    kurtosis,
+    n
+  )
+continuous_summary
+
+```
+
+Add continuous variables to a clean table: (KB)
+```{r, echo=FALSE}
+summary_table <- tribble(
+  ~variable, ~mean, ~sd, ~median, ~min, ~max, ~skew, ~kurtosis, ~n,
+  "avg_chip_seconds", 15631.620549, 2938.8848538, 15284.20, 10304.77, 23679.03, 0.50530121, -0.3896989, 1005,
+  "high_temp",        61.621891,   10.4803135, 61.00, 44.00, 88.00, 0.57757331, -0.3573111, 1005,
+  "low_temp",         46.009950,    7.9703072, 45.00, 28.00, 72.00, 0.77231953,  1.0186755, 1005,
+  "avg_temp",         53.718209,    8.6975811, 52.88, 29.58, 79.35, 0.42260873,  0.3116392, 1005,
+  "dew_point",        41.023831,   10.7187978, 42.40, 21.13, 65.22, -0.08246867, -0.9095537, 1005,
+  "wind_speed",       13.119403,    6.7699588, 13.00,  3.00, 39.00, 0.78517635,  1.0872273, 1005,
+  "visibility",        9.848072,    1.4872173, 10.00,  6.06, 20.00, 2.79083334, 25.7005389, 830,
+  "sea_level_pressure", 29.925970, 0.3391476, 29.98, 29.13, 30.54, -0.41101449, -0.7527869, 1005,
+  "aqi",              50.572139,   21.7623899, 52.00, 11.00, 119.00, 0.32111228, 0.2198760, 1005,
+  "co",               13.948052,   11.7791733,  9.00,  2.00,  56.00, 1.58769285, 2.1592651, 770,
+  "ozone",            36.179104,   18.0530913, 34.00,  7.00, 100.00, 1.22285653, 2.3430336, 1005,
+  "pm10",             23.576000,   13.0305755, 21.00,  5.00,  69.00, 0.89184403, 0.8083714, 625,
+  "pm25",             57.510345,   16.7892845, 53.00, 21.00, 119.00, 0.85098957, 1.3911927, 725,
+  "no2",              31.915423,   14.9253725, 32.00,  7.00,  66.00, 0.15839726, -0.7783209, 1005
+)
+
+kable(summary_table, caption = "Table: Descriptive Statistics for Continuous Variables", digits = 2)
+
+```
+
+The table above summarizes key descriptive statistics for continuous variables in the dataset, including average marathon chip time (in seconds), temperature measures, humidity-related metrics (dew point), wind speed, visibility, air pressure, and air quality indicators (aqi, co, ozone, pm10, pm2.5, no2). For each variable, the table reports its mean, standard deviation, median, minimum, maximum, skewness, kurtosis, and sample size, giving an overview of central tendency, variability, distribution shape, and data completeness.
+
+All the variables show reasonable ranges and central values for weather and airquality conditions during the marathon events. We can see that chip times cluster around 4 hours (about 15,600 seconds) with moderate variability. Temperature measures (high, low, and average) fall within typical seasonal ranges, while air-quality variables such as ozone, pm10, pm2.5, and co show right-skewed distributions, indicating occasional higher pollution days. Visibility also shows strong right skew and high kurtosis, suggesting a few unusually high values compared with the rest of the data. Overall, most variables are moderately skewed, with some (like visibility and co) showing heavier tails.
+
+
+## Figure 1: Distribution of Average Finishing Times (UNKNOWN)
+```{r}
+library(ggplot2) # load plotting library
+ggplot(final_data, aes(x = avg_chip_seconds / 3600)) + # convert from seconds to hours
+  geom_histogram(bins = 20, fill = "steelblue", color = "black") + # create a histogram
+  labs(title = "Distribution of Average Finishing Times", # generate labels
+    x = "Average Finishing Time (hours)",
+    y = "Frequency"
+  )
+```
+
+
+## Figure 2: Overview of the Effect of Avg Temperature on Finishing Time by Marathon (UNKNOWN)
+```{r}
+ggplot(final_data, aes(x = avg_temp, y = avg_chip_seconds / 3600, color = marathon)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~ marathon, scales = "free_x") + # each marathon has own x-axis scale
+  labs(title = "Overview of the Effect of Average Temperature on Finishing Time by Marathon",
+    x = "Average Temperature (°F)",
+    y = "Finishing Time (hours)"
+  )
+```
+
+
+## Figure 3: Overview of the Relationship Between Air Quality and Finishing Time by Marathon
+```{r}
+
+ggplot(final_data, aes(x = aqi, y = avg_chip_seconds / 3600, color = marathon)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~ marathon, scales = "free_x") + 
+  labs(title = "Overview of the Relationship Between Air Quality and Finishing Time by Marathon",
+    x = "Air Quality Index (AQI)",
+    y = "Average Finishing Time (hours)"
+  ) +
+  theme(legend.position = "none")
+```
+
+
+## Figure 4: Correlation Matrix (UNKNOWN)
+```{r}
+# select only the numeric variables
+numeric_vars <- final_data %>%
+  select(avg_chip_seconds, avg_temp, precipitation, dew_point,
+         wind_speed, visibility, sea_level_pressure,
+         aqi, pm10, pm25, no2, ozone, co)
+
+# create correlation matrix
+cor_matrix <- cor(numeric_vars, use = "complete.obs")
+
+# round the correlations
+round(cor_matrix, 2)
+
+#Correlation Heat map
+corrplot(
+  cor_matrix,
+  method="color",col=colorRampPalette(c("darkblue", "white", "red"))(200),
+  addCoef.col="black", tl.col="black", tl.srt=45             
+)
+
+```
+
+
+
+## Figure 5: Scatter plot for pollutants (KB)
+Looking at all the  pollutants we have concerns with (co, pm10, pm2.5, and overall aqi).
+```{r}
+# Make pollutant data into long format for graphing
+pollutant_long <- final_data %>%
+  mutate(
+    finish_hours = avg_chip_seconds / 3600   # convert seconds to hours
+  ) %>%
+  pivot_longer(
+    cols = c(co, pm25, pm10, aqi),
+    names_to = "pollutant",
+    values_to = "value"
+  )
+
+# plotting scatter plots
+ggplot(pollutant_long, 
+       aes(x = value, y = finish_hours, color = pollutant)) +
+  geom_point(alpha = 0.25) +
+  geom_smooth(se = FALSE, method = "loess") +
+  facet_wrap(~ subgroup, scales = "free") +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = "Pollution vs. Finish Times by Performance Subgroup",
+    x = "Pollutant Level (AQI)",
+    y = "Average Finishing Time (hours)",
+    color = "Pollutant"
+  ) +
+  theme_minimal(base_size = 14)
+
+```
+
+
+
+We can see that most of the subgroups follow similar patterns with airquality. As airquality increase, we see an increase in most average finishing times, with some starting to level out at a certain pollutant level among faster subgroups, such as `pm2.5` for elite and competitive subgroups. We can also see that `co` behaves oddly, specifically for slow runners, increasing as fishing time get faster with higher pollutant levels. However this is most likey due to missing `co` data for Berlin. 
+
+## Figure 6: Histograms of continous variables (KB)
+```{r}
+continuous_vars <- final_data %>% 
+  select(avg_chip_seconds, high_temp, low_temp, avg_temp, 
+         dew_point, wind_speed, visibility, sea_level_pressure,
+         aqi, co, ozone, pm10, pm25, no2) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value")
+
+ggplot(continuous_vars, aes(x = value)) +
+  geom_histogram(bins = 30, fill = "#4A90E2", color = "white") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Histograms of Continuous Variables",
+       x = "Value",
+       y = "Count")
+
+```
+
+
+Looking at histograms for all the continuous variables, we can see the distribution shapes. Several of the environmental variables did display expected right skews (such as PM2.5 and wind speed). There is no transformation currently planned for our modeling goals. We can also see that finishing times were right skewed, which is typical for marathon data.
+
+
+## Figure 7: Scatter plots of subgroups (KB)
+We want to see how subgroups behave over the years.
+```{r}
+# Scatter plots by marathon and subgroup
+ggplot(final_data, aes(x = year, y = avg_chip_seconds)) +
+  geom_point(aes(color = subgroup), alpha = 0.7, size = 2) +  # points colored by subgroup
+  geom_smooth(aes(color = subgroup), method = "loess", se = FALSE) + # optional trend lines
+  facet_wrap(~ marathon) +  # one plot per marathon
+  labs(
+    title = "Average Marathon Finishing Times by Year and Subgroup",
+    x = "Year",
+    y = "Average Finishing Time (seconds)",
+    color = "Performance Subgroup"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+```
+
+
+We cans see that over time, most finishing times become faster. We can also see potential shifts in faster finishing times past 2018, where there was the introduction of supershoes. We can really see this in the Chicago marathon, as it has data till 2023. We can potentially see the trend starting with Berlin, however it is hard to tell since the data is only available till 2019. NYC seems to have a pretty  constant finishing times over the years. Boston on the other hand, seems to have increasing finishing times, however it is also hard to interpret the affect of supershoes due to data only being available till 2019, only one year after supershoes have been widely introduced. 
+
+## Figure 8.  (MH)
+```{r}
+#Add 'Overall' graph, making df 'final_data2' for purpose of figure 5 and  6
+final_data2 <- final_data %>% mutate(subgroup = tolower(as.character(subgroup))) %>% bind_rows(final_data %>% 
+mutate(subgroup = "overall")) %>%
+  mutate(subgroup = factor(subgroup,levels = c("elite", "competitive", "average", "recreational", "slow", "overall")))
+final_data2$year <- as.numeric(as.character(final_data2$year))
+
+#Figure 5: Visibility and Finishing time
+ggplot(final_data2, aes(x = visibility, y = avg_chip_seconds / 3600, color = marathon)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(aes(linetype=gender),method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~ subgroup, scales = "free_x") + 
+  labs(title = "Overview of the Relationship Between Visibility and Finishing Time by Performance Subgroup",
+       x = "Visibility (mi)",
+       y = "Average Finishing Time (hours)"
+  ) +
+  theme(legend.position = "right")
+```
+
+
+## Figure 9: (MH)
+```{r}
+# Average Finishing Time by Year, Subgroup, Gender (Supershoes)
+ggplot(final_data2, aes(x = year, y = avg_chip_seconds, color = marathon)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(aes(linetype=gender),method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~ subgroup, scales = "free_x") + 
+  geom_vline(xintercept = 2018, linetype = "dashed", color = "red", linewidth = 1) +  # vertical line
+  labs(title = "Average Finishing Time Over the Years",
+       x = "Year",
+       y = "Average Finishing Time (hours)"
+  ) +
+  theme(legend.position = "right")
+
+
+```
+
+
+## Figure 10: Summary Tables and Box and whisker plots (**need to organize this**) (MH)
+```{r}
+#Boston
+boston <- final_data %>% filter(marathon=="Boston")
+
+#Summarize
+summary_long <- boston %>%
+  group_by(year, gender) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
+    min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
+
+#Pivot wider — ensure one row per year
+summary_wide <- summary_long %>%
+  pivot_wider(id_cols=year,                   
+    names_from=gender,
+    values_from=c(N, mean_sd, min_max),
+    names_glue="{gender}_{.value}") %>% arrange(year)
+
+#Combine into one column per gender for GT
+summary_combined <- summary_wide %>%
+  mutate(Female=paste0("N = ", female_N, "<br>", female_mean_sd, "<br>", female_min_max),
+         Male=paste0("N = ", male_N, "<br>", male_mean_sd, "<br>", male_min_max)) %>%
+  select(year, Female, Male)
+
+#GT table
+summary_combined %>%
+  gt(rowname_col = "year") %>%
+  cols_label(Female = "Female",
+             Male   = "Male") %>%
+  fmt_markdown(columns = c(Female, Male)) %>%
+  tab_options(
+    data_row.padding = px(3),
+    table.font.size = px(14))
+
+
+
+#Berlin
+berlin<- final_data  %>% filter(marathon=="Berlin")
+#Summarize
+summary_long <- berlin %>%
+  group_by(year, gender) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
+    min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
+
+#Pivot wider — ensure one row per year
+summary_wide <- summary_long %>%
+  pivot_wider(id_cols=year,                   
+    names_from=gender,
+    values_from=c(N, mean_sd, min_max),
+    names_glue="{gender}_{.value}") %>% arrange(year)
+
+#Combine into one column per gender for GT
+summary_combined <- summary_wide %>%
+  mutate(Female=paste0("N = ", female_N, "<br>", female_mean_sd, "<br>", female_min_max),
+         Male=paste0("N = ", male_N, "<br>", male_mean_sd, "<br>", male_min_max)) %>%
+  select(year, Female, Male)
+
+#GT table
+summary_combined %>%
+  gt(rowname_col = "year") %>%
+  cols_label(Female = "Female",
+             Male   = "Male") %>%
+  fmt_markdown(columns = c(Female, Male)) %>%
+  tab_options(
+    data_row.padding = px(3),
+    table.font.size = px(14))
+
+
+#Chicago
+chicago<- final_data  %>% filter(marathon=="Chicago")
+#Summarize
+summary_long <- chicago %>%
+  group_by(year, gender) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
+    min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
+
+#Pivot wider — ensure one row per year
+summary_wide <- summary_long %>%
+  pivot_wider(id_cols=year,                   
+    names_from=gender,
+    values_from=c(N, mean_sd, min_max),
+    names_glue="{gender}_{.value}") %>% arrange(year)
+
+#Combine into one column per gender for GT
+summary_combined <- summary_wide %>%
+  mutate(Female=paste0("N = ", female_N, "<br>", female_mean_sd, "<br>", female_min_max),
+         Male=paste0("N = ", male_N, "<br>", male_mean_sd, "<br>", male_min_max)) %>%
+  select(year, Female, Male)
+
+#GT table
+summary_combined %>%
+  gt(rowname_col = "year") %>%
+  cols_label(Female = "Female",
+             Male   = "Male") %>%
+  fmt_markdown(columns = c(Female, Male)) %>%
+  tab_options(
+    data_row.padding = px(3),
+    table.font.size = px(14))
+
+#NYC
+NYC<- final_data %>% filter(marathon=="NYC")
+#Summarize
+summary_long <- NYC %>%
+  group_by(year, gender) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(mean_sd= sprintf("%.1f (%.1f)", mean_time, sd_time),
+    min_max= sprintf("(%.1f, %.1f)", min_time, max_time))
+
+#Pivot wider — ensure one row per year
+summary_wide <- summary_long %>%
+  pivot_wider(id_cols=year,                   
+    names_from=gender,
+    values_from=c(N, mean_sd, min_max),
+    names_glue="{gender}_{.value}") %>% arrange(year)
+
+#Combine into one column per gender for GT
+summary_combined <- summary_wide %>%
+  mutate(Female=paste0("N = ", female_N, "<br>", female_mean_sd, "<br>", female_min_max),
+         Male=paste0("N = ", male_N, "<br>", male_mean_sd, "<br>", male_min_max)) %>%
+  select(year, Female, Male)
+
+#GT table
+summary_combined %>%
+  gt(rowname_col = "year") %>%
+  cols_label(Female = "Female",
+             Male   = "Male") %>%
+  fmt_markdown(columns = c(Female, Male)) %>%
+  tab_options(
+    data_row.padding = px(3),
+    table.font.size = px(14))
+
+
+###############ALL to be merged manually
+
+
+#Boston
+boston<- final_data %>% filter(marathon=="Boston")
+summary_all <- boston %>%
+  group_by(year) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(
+    combined=paste0(
+      "N = ", N, "<br>",
+      sprintf("%.1f (%.1f)", mean_time, sd_time), "<br>",
+      sprintf("(%.1f, %.1f)", min_time, max_time))) %>%
+  select(year, combined)
+summary_all %>%
+  gt(rowname_col = "year") %>%
+  cols_label(combined="All Runners") %>%
+  fmt_markdown(columns="combined") %>%
+  tab_options(data_row.padding = px(3),table.font.size = px(14))
+
+
+
+
+#Berlin
+berlin<- final_data %>% filter(marathon=="Berlin")
+summary_all <- berlin %>%
+  group_by(year) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(
+    combined=paste0(
+      "N = ", N, "<br>",
+      sprintf("%.1f (%.1f)", mean_time, sd_time), "<br>",
+      sprintf("(%.1f, %.1f)", min_time, max_time))) %>%
+  select(year, combined)
+summary_all %>%
+  gt(rowname_col = "year") %>%
+  cols_label(combined="All Runners") %>%
+  fmt_markdown(columns="combined") %>%
+  tab_options(data_row.padding = px(3),table.font.size = px(14))
+
+
+#Chicago
+chicago<- final_data %>% filter(marathon=="Chicago")
+summary_all <- chicago %>%
+  group_by(year) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(
+    combined=paste0(
+      "N = ", N, "<br>",
+      sprintf("%.1f (%.1f)", mean_time, sd_time), "<br>",
+      sprintf("(%.1f, %.1f)", min_time, max_time))) %>%
+  select(year, combined)
+summary_all %>%
+  gt(rowname_col = "year") %>%
+  cols_label(combined="All Runners") %>%
+  fmt_markdown(columns="combined") %>%
+  tab_options(data_row.padding = px(3),table.font.size = px(14))
+
+#NYC
+NYC<- final_data %>% filter(marathon=="NYC")
+summary_all <- NYC %>%
+  group_by(year) %>%
+  summarise(
+    N=n(),
+    mean_time=mean(avg_chip_seconds, na.rm = TRUE),
+    sd_time=sd(avg_chip_seconds, na.rm = TRUE),
+    min_time=min(avg_chip_seconds, na.rm = TRUE),
+    max_time=max(avg_chip_seconds, na.rm = TRUE),
+    .groups="drop") %>%
+  mutate(
+    combined=paste0(
+      "N = ", N, "<br>",
+      sprintf("%.1f (%.1f)", mean_time, sd_time), "<br>",
+      sprintf("(%.1f, %.1f)", min_time, max_time))) %>%
+  select(year, combined)
+summary_all %>%
+  gt(rowname_col = "year") %>%
+  cols_label(combined="All Runners") %>%
+  fmt_markdown(columns="combined") %>%
+  tab_options(data_row.padding = px(3),table.font.size = px(14))
+
+
+
+
+#BOX AND WHISKER
+#BOSTON
+ggplot(boston, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Boston Marathon Chip Times by Gender") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(boston, aes(x = "", y =avg_chip_seconds / 3600)) +
+  geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Boston Marathon Chip Times - All Runners") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+#BERLIN
+ggplot(berlin, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Berlin Marathon Chip Times by Gender") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(berlin, aes(x = "", y =avg_chip_seconds / 3600)) +
+  geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Berlin Marathon Chip Times - All Runners") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+#CHICAGO
+ggplot(chicago, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Chicago Marathon Chip Times by Gender") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(chicago, aes(x = "", y =avg_chip_seconds / 3600)) +
+  geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "Chicago Marathon Chip Times - All Runners") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+
+#NYC
+ggplot(NYC, aes(x = gender, y =avg_chip_seconds/ 3600, fill = gender)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "NYC Marathon Chip Times by Gender") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(NYC, aes(x = "", y =avg_chip_seconds / 3600)) +
+  geom_boxplot(fill = "steelblue", outlier.alpha = 0.3) +
+  scale_y_continuous(name = "Chip Time") +
+  labs(title = "NYC Marathon Chip Times - All Runners") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+```
+
+# Preprocessing and Feature Engineering (KB, ZD, MG)
+
+Look at the full dataset for missing values (ZD, KB)
+```{r}
+# Summarize missing values
+missing_summary <- final_data %>%
+  summarise(across(everything(), ~sum(is.na(.))))
+
+# Keep only columns with any missing values
+missing_summary <- missing_summary %>%
+  select(where(~any(. > 0)))
+
+# Display nicely in HTML
+knitr::kable(missing_summary, caption = "Missing Values per Variable")
+
+```
+
+We can see that `visability`, `co`, `pm10`, and `pm25` all have alot of missing values. This is due to the Berlin dataset.
+
+## Berlin as a second case study (KB)
+Spit the data so Berlin is used as a second case study to show how the method performs with missing data (whether successful or not).
+```{r}
+main_data <- final_data %>% filter(marathon != "Berlin")
+berlin_data <- final_data %>% filter(marathon == "Berlin")
+
+str(main_data)
+```
+We can see the main_data with out berlin now has 770 obs. and 21 variables. 
+
+## Handling Missing Values (ZD, KB)
+```{r}
+# Summarize missing values
+missing_summary <- main_data %>%
+  summarise(across(everything(), ~sum(is.na(.))))
+
+# Keep only columns with at least one missing value
+missing_summary <- missing_summary %>%
+  select(where(~any(. > 0)))
+
+# Display nicely in HTML
+knitr::kable(missing_summary, caption = "Missing Values per Variable")
+
+```
+
+In the main_data, we can see that there are still 320 missing values for pm10 and 70 missing values for pm2.5. 
+
+### Remove PM10 (KB)
+Since PM10 has a lot of missing values still, we will drop that column completely.
+```{r}
+main_data <- main_data %>%
+  select(-pm10) 
+```
+
+### KNN Imputation on PM2.5 (KB)
+Since PM2.5 is often the main pollutant, we decided to use KNN imputation to fill missing PM2.5 values because it predicts missing data using similar rows without assuming a specific parametric relationship, preserves variance, and works well for our relatively small dataset while using correlations with other environmental variables.
+```{r}
+# Impute missing PM2.5 values using 5 nearest neighbors
+main_data <- kNN(main_data, variable = "pm25", k = 5) # can change later to see which K gives best model performance 
+
+# remove pm25_imp
+cols_to_remove <- c(
+  "pm25_imp"
+)
+
+main_data <- main_data[, !(names(main_data) %in% cols_to_remove)]
+
+# Check that missing values are filled
+summary(main_data$pm25)
+```
+We can see that there are no missing values now and we can get a clean summary of the data. 
+
+Convert categorical variables to factors: (KB)
+```{r}
+main_data  <- main_data  %>%
+  mutate(subgroup = factor(subgroup),
+         gender = factor(gender),
+         marathon = factor(marathon),
+         main_pollutant = factor(main_pollutant))
+
+str(main_data)
+```
+We can see that the identifiers (subgroup, gender, marathon) and predictor (main_pollutant) were all converted to factors so that our models can properly recognized them. 
+
+## Feature engineering (ZD, KB)
+```{r}
+# create interaction terms and convert supershoe to factor
+main_data_fe <- main_data %>%
+  mutate(
+    supershoe = factor(ifelse(year >= 2018, 1, 0), levels = c(0, 1)),
+    temp_dew_interaction       = avg_temp * dew_point,
+    temp_aqi_interaction       = avg_temp * aqi, 
+    temp_precip_interaction    = avg_temp * precipitation,
+    temp_wind_interaction      = avg_temp * wind_speed,
+    pm25_temp_interaction      = pm25 * avg_temp,
+    dew_wind_interaction       = dew_point * wind_speed,
+    pressure_temp_interaction  = sea_level_pressure * avg_temp,
+    avg_temp_gender_interaction = avg_temp * as.numeric(gender == "male")
+  )
+
+str(main_data_fe)
+```
+
+## Correlation Check (KB)
+Need to do a Quick correlation check for numeric variables and see what features inroduce multicollinearity.
+```{r}
+# Find numeric columns after feature engineering, excluding 'year' and 'n' since they are idenifiers
+numeric_vars <- main_data_fe %>%
+  select(where(is.numeric)) %>%
+  select(-year, -n) %>% 
+  names()
+
+numeric_vars
+```
+We can see that there are a total 14 continuous variables, disincluding the identifiers `year` and `n`. 
+
+Creat Correlation Matrix and make a visual: (KB)
+```{r}
+cor_matrix <- cor(main_data_fe[numeric_vars], use = "pairwise.complete.obs")
+
+# rounding
+round(cor_matrix, 2)
+
+#ploting
+corrplot(
+  cor_matrix,
+  method = "color",
+  col = colorRampPalette(c("blue", "white", "red"))(200),
+  tl.cex = 0.6
+)
+```
+
+
+Looking at the visual, we can see that a lot of these features were highly correlated and will have to be removed. For example, high_temp and low_temp are strongly correlated with avg_temp (0.93 and 0.92), and aqi overlaps with pm25 (0.94). Interaction terms like temp_dew_interaction, temp_precip_interaction, and pressure_temp_interaction show very high correlations with their constituent variables (up to 1.00), making them redundant. Similarly, main_pollutant is just a categorical version of aqi. Overall, these features provide little additional information and can be removed to reduce multicollinearity. 
+
+## Observing categorical variables (KB)
+Looking at their distributions to see if we should keep or remove them.
+```{r}
+table(main_data_fe$main_pollutant)
+table(main_data_fe$supershoe)
+```
+
+We can see that main_pollutant still contains data from pm10 which was removed. Also we know that main_pollutant is the categorical variable for aqi, and since aqi is highly correlated with pm2.5 (often the main_pollutant), we will drop aqi and main_pollutant all together. 
+
+Looking at the supershoes variable, there is an expected imbalance, with more observations of years without supershoes (0 = 640) and fewer with supershoes (1 = 130) since they were introduced more recently in 2018. We will keep this as a control variable, and if needed, techniques like weighting can be applied to help the imbalance.
+
+Removing correlated variables as seen above: (KB)
+```{r}
+cols_to_remove <- c(
+  "high_temp",
+  "low_temp",
+  "aqi",
+  "temp_dew_interaction",
+  "temp_precip_interaction",
+  "temp_wind_interaction",
+  "pm25_temp_interaction",
+  "dew_wind_interaction",
+  "pressure_temp_interaction",
+  "main_pollutant" 
+)
+
+main_data_fe <- main_data_fe[, !(names(main_data_fe) %in% cols_to_remove)]
+str(main_data_fe)
+
+```
+Now we have a dataset that has 770 obs. and only 19 variables after the addition of newly engineered features and removal if highly correlated features. 
+
+
+# Feature Selection Using Supervised Models (KB, MH, ZD)
+
+## Decision Trees (KB, MH)
+Using the final merged dataset before feature engineering. There is no gender interaction for the sake of feature engineering investigation. 
+```{r}
+#(KB from merging and pre-feat-eng)
+
+#Compute average finishing time per mararthon/year (no gender) (KB, MH)
+avg_times_tree <- marathons_all %>% # (KB) switch to marathons_all dataset instead of runners dataset
+  group_by(marathon, year) %>%
+  summarize(
+    n = n(),  # number of runners in each subgroup
+    avg_chip_seconds = mean(chip_seconds, na.rm = TRUE),  
+    .groups = "drop"
+  )
+
+
+# Left join weather_clean and airquailty_clean onto the cleaned marathon datasets (KB) (MH)
+final_data <- avg_times_tree %>%
+  left_join(weather_clean, by = c("year", "marathon")) %>%
+  left_join(airquality_clean, by = c("year", "marathon"))
+# Impute missing PM2.5 values using 5 nearest neighbors
+final_data_tree <- kNN(final_data, variable = "pm25", k = 5) # can change later to see which K gives best model performance 
+
+# remove pm25_imp
+cols_to_remove <- c(
+  "pm25_imp"
+)
+
+final_data_tree <- final_data_tree[, !(names(final_data_tree) %in% cols_to_remove)]
+
+
+# create interaction terms and convert supershoe to factor (KB, MH)
+final_data_tree <- final_data_tree %>%
+  mutate(
+    supershoe = factor(ifelse(year >= 2018, 1, 0), levels = c(0, 1)),
+    temp_dew_interaction       = avg_temp * dew_point,
+    temp_aqi_interaction       = avg_temp * aqi, 
+    temp_precip_interaction    = avg_temp * precipitation,
+    temp_wind_interaction      = avg_temp * wind_speed,
+    pm25_temp_interaction      = pm25 * avg_temp,
+    dew_wind_interaction       = dew_point * wind_speed,
+    pressure_temp_interaction  = sea_level_pressure * avg_temp
+  )
+
+cols_to_remove <- c(
+  "high_temp",
+  "low_temp",
+  "aqi",
+  "temp_dew_interaction",
+  "temp_precip_interaction",
+  "temp_wind_interaction",
+  "pm25_temp_interaction",
+  "dew_wind_interaction",
+  "pressure_temp_interaction",
+  "main_pollutant", 
+  "pm10"
+)
+final_data_tree <- final_data_tree[, !(names(final_data_tree) %in% cols_to_remove)]
+
+# indicate and define year of covid (ZD)
+final_data_tree <- final_data_tree %>%
+  mutate(
+    covid_era = ifelse(year == 2020, 1, 0)
+  )
+
+#removed Berlin
+final_data_tree <- final_data_tree %>% filter(marathon != "Berlin")
+```
+
+Add our 90/10 training/test split for the decision tree (ZD) (KB)
+```{r}
+# split data into train and test
+set.seed(123)
+
+train_index_tree <- sample(1:nrow(final_data_tree), size = 0.9 * nrow(final_data_tree)) # use a 90/10 split
+
+train_data_tree <- final_data_tree[train_index_tree, ]
+test_data_tree  <- final_data_tree[-train_index_tree, ]
+```
+
+Decision tree looking at weather and airquality features to consider breaking down into bins.
+reference: https://bradleyboehmke.github.io/HOML/DT.html (MH) (KB)
+```{r}
+feature_check <- rpart(
+  avg_chip_seconds ~ avg_temp + precipitation + dew_point + wind_speed + visibility +
+    sea_level_pressure + co + ozone + pm25 + no2 + supershoe + temp_aqi_interaction + covid_era,
+  data = train_data_tree,
+  method = "anova"
+)
+
+# Plot showing important features and potential bins
+rpart.plot(feature_check)
+```
+
+
+We can see that the decision tree shows that wind speed is the most important factor, splitting at 13 units. For higher wind speeds, ozone and temperature further influence the outcome. For lower wind speeds, temperature is the main driver.
+
+Categorical bins from tree (TRAIN ONLY) (MH) (KB)
+```{r}
+# wind speed bin
+train_data_tree$wind_bin <- ifelse(train_data_tree$wind_speed >= 13,
+                              "high_wind",
+                              "low_wind")
+
+# ozone bin
+train_data_tree$ozone_bin <- ifelse(train_data_tree$ozone >= 38,
+                               "high_ozone",
+                               "low_ozone")
+
+# temp bins (merging 'cool' and 'moderate', since moderate is a tiny bin)
+train_data_tree$temp_bin <- cut(train_data_tree$avg_temp,
+                           breaks = c(-Inf, 58, Inf),  # merge 'cool' and 'moderate'
+                           labels = c("cool_moderate", "warm"),
+                           right = FALSE)
+
+# pm2.5 bin
+train_data_tree$pm25_bin <- ifelse(train_data_tree$pm25 >= 54,
+                              "high_pm25",
+                              "low_pm25")
+
+# temp × aqi interaction bin
+train_data_tree$temp_aqi_bin <- ifelse(train_data_tree$temp_aqi_interaction >= 2789,
+                                  "high_interaction",
+                                  "low_interaction")
+
+```
+
+Comparing models with continuous and binned data (TRAIN ONLY) (KB, MH)
+```{r}
+# continuous-only model
+model_cont <- lm(avg_chip_seconds ~ avg_temp + ozone + pm25 + wind_speed + temp_aqi_interaction,
+                 data = train_data_tree)
+
+# full binned model
+model_bin <- lm(avg_chip_seconds ~ temp_bin + ozone_bin + pm25_bin + wind_bin + temp_aqi_bin,
+                data = train_data_tree)
+
+# temperature binned with all others continuous
+model_temp <- lm(avg_chip_seconds ~ temp_bin + ozone + pm25 + wind_speed + temp_aqi_interaction,
+                 data = train_data_tree)
+
+# temperature and ozone binned with all others continuous
+model_temp_ozone <- lm(avg_chip_seconds ~ temp_bin + ozone_bin + pm25 + wind_speed + temp_aqi_interaction,
+                       data = train_data_tree)
+
+# air quality binned (ozone + pm25) with temperature continuous
+model_airbin <- lm(avg_chip_seconds ~ avg_temp + ozone_bin + pm25_bin + wind_speed + temp_aqi_interaction,
+                   data = train_data_tree)
+
+# ozone binned only
+model_ozone <- lm(avg_chip_seconds ~ avg_temp + ozone_bin + pm25 + wind_speed + temp_aqi_interaction,
+                  data = train_data_tree)
+
+# wind binned only
+model_wind <- lm(avg_chip_seconds ~ avg_temp + ozone + pm25 + wind_bin + temp_aqi_interaction,
+                 data = train_data_tree)
+
+# wind + ozone + pm25 binned
+model_wind_air <- lm(avg_chip_seconds ~ avg_temp + ozone_bin + pm25_bin + wind_bin + temp_aqi_interaction,
+                     data = train_data_tree)
+
+```
+
+Comparing R2 and comparing AIC (KB, MH)
+```{r}
+#Comparing R2
+summary(model_cont)$r.squared
+summary(model_bin)$r.squared
+summary(model_temp)$r.squared
+summary(model_temp_ozone)$r.squared
+summary(model_airbin)$r.squared
+summary(model_ozone)$r.squared
+summary(model_wind)$r.squared
+summary(model_wind_air)$r.squared
+
+#Comparing AIC
+AIC(model_cont)
+AIC(model_bin)
+AIC(model_temp)
+AIC(model_temp_ozone)
+AIC(model_airbin)
+AIC(model_ozone)
+AIC(model_wind)
+AIC(model_wind_air)
+```
+
+Caret cross-validation results (TRAINING DATA) (KB, MH)
+```{r}
+set.seed(123)
+
+train_control <- trainControl(method = "cv", number = 10)
+
+cv_cont <- train(avg_chip_seconds ~ avg_temp + ozone + pm25 + wind_speed + temp_aqi_interaction,
+                 data = train_data_tree,
+                 method = "lm",
+                 trControl = train_control)
+
+cv_bin <- train(avg_chip_seconds ~ temp_bin + ozone_bin + pm25_bin + wind_bin + temp_aqi_bin,
+                data = train_data_tree,
+                method = "lm",
+                trControl = train_control)
+
+cv_temp <- train(avg_chip_seconds ~ temp_bin + ozone + pm25 + wind_speed + temp_aqi_interaction,
+                 data = train_data_tree,
+                 method = "lm",
+                 trControl = train_control)
+
+cv_temp_ozone <- train(avg_chip_seconds ~ temp_bin + ozone_bin + pm25 + wind_speed + temp_aqi_interaction,
+                       data = train_data_tree,
+                       method = "lm",
+                       trControl = train_control)
+
+cv_airbin <- train(avg_chip_seconds ~ avg_temp + ozone_bin + pm25_bin + wind_speed + temp_aqi_interaction,
+                   data = train_data_tree,
+                   method = "lm",
+                   trControl = train_control)
+
+cv_ozone <- train(avg_chip_seconds ~ avg_temp + ozone_bin + pm25 + wind_speed + temp_aqi_interaction,
+                  data = train_data_tree,
+                  method = "lm",
+                  trControl = train_control)
+
+cv_wind <- train(avg_chip_seconds ~ avg_temp + ozone + pm25 + wind_bin + temp_aqi_interaction,
+                 data = train_data_tree,
+                 method = "lm",
+                 trControl = train_control)
+
+cv_wind_air <- train(avg_chip_seconds ~ avg_temp + ozone_bin + pm25_bin + wind_bin + temp_aqi_interaction,
+                     data = train_data_tree,
+                     method = "lm",
+                     trControl = train_control)
+
+```
+
+
+Getting the results (KB)
+```{r}
+combined_results <- bind_rows(
+  cv_cont$results    %>% mutate(Model = "cv_cont"),
+  cv_bin$results     %>% mutate(Model = "cv_bin"),
+  cv_temp$results    %>% mutate(Model = "cv_temp"),
+  cv_temp_ozone$results %>% mutate(Model = "cv_temp_ozone"),
+  cv_airbin$results  %>% mutate(Model = "cv_airbin"),
+  cv_ozone$results   %>% mutate(Model = "cv_ozone"),
+  cv_wind$results    %>% mutate(Model = "cv_wind"),
+  cv_wind_air$results %>% mutate(Model = "cv_wind_air")
+) %>%
+  select(Model, everything())  
+
+print(combined_results)
+```
+We can see that the model with ozone and PM2.5 binned has the lowest RMSE and MAE, suggesting higher accuracy, and one of the highest R2 to explain variability. The model with just ozone binned has the highest R2, but also slightly higher RMSE and MAE.
+
+Based on these results, we will incorporate the binned ozone and PM2.5 features into our final dataset for modeling and test a couple of initial models with the continuous version of these features, as well as the binned version.
+
+## LASSO (KB)
+LASSO is being used to answer the following question: 
+Which version of the air-quality and temperature features should we keep for the final model?
+
+Add our 90/10 training/test split for LASSO (KB, ZD)
+```{r}
+# split data into train and test
+set.seed(123)
+
+train_index <- sample(1:nrow(main_data_fe), size = 0.9 * nrow(main_data_fe)) # use a 90/10 split
+
+train_data_scaled <- main_data_fe[train_index, ]
+test_data_scaled <- main_data_fe[-train_index, ]
+```
+
+Data Scaling for LASSO and later linear regression model (ZD, KB)
+```{r}
+# Identify numeric predictors to scale (exclude outcome and identifiers)
+numeric_vars <- train_data_scaled %>%
+  select(where(is.numeric)) %>%
+  select(-avg_chip_seconds, -year, -n) %>%
+  names()
+
+# scale training data and save scaling parameters
+train_scaled <- scale(train_data_scaled[numeric_vars])
+train_data_scaled[paste0("scaled_", numeric_vars)] <- train_scaled
+
+train_center <- attr(train_scaled, "scaled:center")
+train_scale  <- attr(train_scaled, "scaled:scale")
+
+# Scale test data (only numeric vars that exist in test)
+numeric_vars_test <- intersect(numeric_vars, names(test_data_scaled))
+test_scaled <- scale(test_data_scaled[numeric_vars_test],
+                     center = train_center[numeric_vars_test],
+                     scale  = train_scale[numeric_vars_test])
+test_data_scaled[paste0("scaled_", numeric_vars_test)] <- test_scaled
+
+
+summary(train_data_scaled[paste0("scaled_", numeric_vars)])
+
+```
+We can see that all the continuous variables for the train and test data, not including the identifying variables `year` and `n`, were successfully scaled with means at 0 and standard deviations of 1, showing that the standardization was correctly applied.
+
+
+Add Binned features based off Decision Tree (ozone_bin and pm25_bin) (KB)
+```{r}
+# Create bins on original numeric columns
+train_data_scaled$ozone_bin <- factor(ifelse(train_data_scaled$ozone >= 38, 1, 0), levels = c(0, 1))
+train_data_scaled$pm25_bin  <- factor(ifelse(train_data_scaled$pm25 >= 54, 1, 0), levels = c(0, 1))
+
+test_data_scaled$ozone_bin <- factor(ifelse(test_data_scaled$ozone >= 38, 1, 0), levels = c(0, 1))
+test_data_scaled$pm25_bin  <- factor(ifelse(test_data_scaled$pm25 >= 54, 1, 0), levels = c(0, 1))
+
+# Remove original numeric columns
+train_data_scaled <- train_data_scaled %>%
+  select(-all_of(numeric_vars))
+
+test_data_scaled <- test_data_scaled %>%
+  select(-all_of(numeric_vars_test))
+
+```
+
+We made the factor levels:  
+- ozone bin: 0 = low, 1 = high
+- pm25 bin: 0 = low, 1 = high
+
+Prepare the predictor matrix (x) and outcome vector (y) (KB)
+```{r}
+# Only using ozone and PM2.5 (continuous and binned)
+x_train <- model.matrix(avg_chip_seconds ~ scaled_ozone + scaled_pm25 + 
+                        ozone_bin + pm25_bin, data = train_data_scaled)[,-1]  # remove intercept
+y_train <- train_data_scaled$avg_chip_seconds
+
+x_test <- model.matrix(avg_chip_seconds ~ scaled_ozone + scaled_pm25 + 
+                       ozone_bin + pm25_bin, data = test_data_scaled)[,-1]
+y_test <- test_data_scaled$avg_chip_seconds
+```
+
+Run LASSO with cross-validation to select lambda (KB)
+```{r}
+set.seed(123)
+
+lasso_cv <- cv.glmnet(x_train, y_train, alpha = 1, standardize = FALSE)  # already scaled
+
+# Find the best lambda
+best_lambda <- lasso_cv$lambda.min
+best_lambda
+
+# Fit final LASSO model at best lambda
+lasso_model <- glmnet(x_train, y_train, alpha = 1, lambda = best_lambda, standardize = FALSE)
+
+# Check coefficients
+coef(lasso_model)
+
+# Predict on test set
+preds <- predict(lasso_model, newx = x_test)
+
+# Evaluate performance
+rmse <- sqrt(mean((y_test - preds)^2))
+mae  <- mean(abs(y_test - preds))
+rmse
+mae
+
+```
+We can see that both binned features and scaled_pm25 were retained showing (.). We can also see that scaled_ozone shrank to nearly 0, which means it did not contribute to the predicting average chip time once the binned values were also included. The model achieved an RMSE of 3383 seconds and a MAE of 2861 seconds, suggesting that good predictive performance. 
+
+
+For a simpler and more interpretable model, we will drop the original numeric features and keep only the binned features based on LASSO results (KB)
+```{r}
+# Remove scaled_ozone and scaled_pm25 from training and test
+train_data_scaled <- train_data_scaled[, !(names(train_data_scaled) %in% c("scaled_ozone"))]
+test_data_scaled  <- test_data_scaled[, !(names(test_data_scaled) %in% c("scaled_ozone"))]
+
+train_data_scaled <- train_data_scaled[, !(names(train_data_scaled) %in% c("scaled_pm25"))]
+test_data_scaled  <- test_data_scaled[, !(names(test_data_scaled) %in% c("scaled_pm25"))]
+
+str(train_data_scaled)
+str(test_data_scaled)
+```
+
+We can see that scaled ozone was successfully removed from both train and test data. Now this dataset is ready for our initial linear regression model. 
+
+
+# Initial Modeling (ZD, MH) (**NEED TO CHECK ALL THE STEPS UNDERE HERE, IM NOT SURE WHAT CODE YALL WANT**)
+
+Initial Model (MH) (**NEED TO CHECK HERE**)
+```{r}
+# Get rid of this model since we are dropping scaledPM25? Not sure if we want to add other model here? Maybe for Ozone bin? Im not to sure... (KB)
+
+#lm_initial_scaledPM25 <- lm(avg_chip_seconds ~ marathon + gender + subgroup + supershoe + scaled_avg_temp + scaled_precipitation + scaled_dew_point + scaled_wind_speed + scaled_visibility + scaled_sea_level_pressure + scaled_co + scaled_pm25 + ozone_bin + scaled_no2 + scaled_temp_aqi_interaction + scaled_avg_temp_gender_interaction, data = train_data_scaled)
+
+
+#summary(lm_initial_scaledPM25)
+#plot(lm_initial_scaledPM25)
+
+lm_initial_PM25bin <- lm(avg_chip_seconds ~ marathon + gender + subgroup + supershoe + scaled_avg_temp + scaled_precipitation + scaled_dew_point + scaled_wind_speed + scaled_visibility + scaled_sea_level_pressure + scaled_co + pm25_bin + ozone_bin + scaled_no2 + scaled_temp_aqi_interaction + scaled_avg_temp_gender_interaction, data = train_data_scaled)
+
+
+summary(lm_initial_PM25bin)
+plot(lm_initial_PM25bin)
+
+```
+Adding RMSE and MAE for looking at overfitting with test results below (MH/ZD) (**NEED TO CHECK HERE**)
+```{r}
+residuals_lm_initial_PM25bin <- lm_initial_PM25bin$residuals
+residuals_lm_initial_PM25bin_rmse <- sqrt(mean(residuals_lm_initial_PM25bin^2))
+residuals_lm_initial_PM25bin_mae <- mean(abs(residuals_lm_initial_PM25bin))
+
+#residuals_lm_initial_scaledPM25 <- lm_initial_scaledPM25$residuals
+#residuals_lm_initial_scaledPM25_rmse <- sqrt(mean(residuals_lm_initial_scaledPM25^2))
+#residuals_lm_initial_scaledPM25_mae <- mean(abs(residuals_lm_initial_scaledPM25))
+
+
+
+#model_compare_train <- data.frame(
+#  Model = c("Continuous PM2.5", "PM2.5 Bin"),
+#  RMSE  = c(residuals_lm_initial_scaledPM25_rmse,
+#            residuals_lm_initial_PM25bin_rmse),
+#  MAE   = c(residuals_lm_initial_scaledPM25_mae,
+#            residuals_lm_initial_PM25bin_mae),
+#  R2    = c(summary(lm_initial_scaledPM25)$r.squared,
+#            summary(lm_initial_PM25bin)$r.squared)
+#)
+
+model_compare_train <- data.frame(
+  Model = c("PM2.5 Bin"),
+  RMSE  = c(residuals_lm_initial_PM25bin_rmse),
+  MAE   = c(residuals_lm_initial_PM25bin_mae),
+  R2    = c(summary(lm_initial_PM25bin)$r.squared)
+)
+
+
+# Display nicely formatted table (NEED TO FIX THIS TITLE)
+knitr::kable(model_compare_train, digits = 4,
+             caption = "Training Data Comparison: Continuous vs Binned PM2.5")
+
+```
+
+More Modeling (ZD) (**NEED TO FIX HERE**)
+```{r}
+# build a function
+evaluate <- function(model, test_data) {
+  preds <- predict(model, newdata = test_data)
+  actual <- test_data$avg_chip_seconds
+  
+  rmse <- sqrt(mean((preds - actual)^2))
+  mae  <- mean(abs(preds - actual))
+  r2   <- cor(preds, actual)^2
+  
+  return(list(RMSE = rmse, MAE = mae, R2 = r2))
+}
+
+# Evaluate Model 1 with scaled PM2.5
+#results_scaledPM25 <- evaluate(lm_initial_scaledPM25, test_data)
+
+# Evaluate Model 2 with PM2.5 bin
+results_PM25bin <- evaluate(lm_initial_PM25bin, test_data_scaled)
+```
+
+Compare results (ZD) (**NEED TO FIX HERE**)
+```{r}
+#model_compare <- data.frame(
+#  Model = c("Continuous PM2.5", "PM2.5 Bin"),
+#  RMSE = c(results_scaledPM25$RMSE, results_PM25bin$RMSE),
+#  MAE  = c(results_scaledPM25$MAE,  results_PM25bin$MAE),
+#  R2   = c(results_scaledPM25$R2,   results_PM25bin$R2)
+#)
+
+#knitr::kable(model_compare, digits = 4,
+#             caption = "Comparison of Initial Models: Continuous vs Binned PM2.5")
+
+model_compare <- data.frame(
+  Model = c("PM2.5 Bin"),
+  RMSE  = c(results_PM25bin$RMSE),
+  MAE   = c(results_PM25bin$MAE),
+  R2    = c(results_PM25bin$R2)
+)
+
+knitr::kable(model_compare, digits = 4,
+             caption = "Comparison of Initial Models: Binned PM2.5")
+
+```
+
+Build residual plots (ZD)
+```{r}
+plot(lm_initial_PM25bin, which = 1)   # Residuals vs Fitted
+plot(lm_initial_PM25bin, which = 2)   # Q–Q plot
+```
+
+# XGBoost Models (KB, ZD, MH)
+
+## XGBoost feature engineered model (KB, ZD
+
+Add our 90/10 training/test split with no scaling (ZD)
+```{r}
+# split data into train and test
+set.seed(42)
+
+train_index <- sample(1:nrow(main_data_fe), size = 0.9 * nrow(main_data_fe)) # use a 90/10 split
+
+train_data <- main_data_fe[train_index, ]
+test_data  <- main_data_fe[-train_index, ]
+```
+
+Add Binned features based off Decision Tree (ozone_bin and pm25_bin) (KB)
+```{r}
+# Training data 
+train_data$ozone_bin <- factor(ifelse(train_data$ozone >= 38, 1, 0), levels = c(0, 1))
+train_data$pm25_bin  <- factor(ifelse(train_data$pm25 >= 54, 1, 0), levels = c(0, 1))
+
+# Test data using same thresholds
+test_data$ozone_bin <- factor(ifelse(test_data$ozone >= 38, 1, 0), levels = c(0, 1))
+test_data$pm25_bin  <- factor(ifelse(test_data$pm25 >= 54, 1, 0), levels = c(0, 1))
+```
+
+We made the factor levels:  
+- ozone bin: 0 = low, 1 = high
+- pm25 bin: 0 = low, 1 = high
+
+Remove ozone and pm25 based on LASSO results and keeping the ozone and opm25 bins based on decision tree (KB)
+```{r}
+# Remove ozone and pm25 from training and test data
+train_data <- train_data[, !(names(train_data) %in% c("ozone", "pm25"))]
+test_data  <- test_data[, !(names(test_data) %in% c("ozone", "pm25"))]
+
+str(train_data)
+str(test_data)
+```
+
+We can see that ozone and pm25 were successfully removed from both datasets and we now have the binned features.
+
+
+Attempt for XGboost model containing the engineered features, binned features, and scaled features: (ZD)
+```{r}
+# Remove identifiers before creating model matrix
+# Convert dataset to numeric-only matrix
+train_matrix <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = train_data %>% select(-year, -n)
+)
+
+test_matrix <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = test_data %>% select(-year, -n)
+)
+
+# Convert to DMatrix format for tuning, needed for cross validation
+dtrain <- xgb.DMatrix(data = train_matrix, label = train_data$avg_chip_seconds)
+dtest  <- xgb.DMatrix(data = test_matrix,  label = test_data$avg_chip_seconds)
+```
+
+Create an untuned XGBoost model (ZD)
+```{r}
+xgb_base <- xgboost(
+  data = dtrain,
+  nrounds = 200,
+  objective = "reg:squarederror",
+  verbose = FALSE # mute iterations
+)
+
+pred_xgb <- predict(xgb_base, dtest)
+
+rmse_xgb <- rmse(test_data$avg_chip_seconds, pred_xgb)
+mae_xgb  <- mae(test_data$avg_chip_seconds, pred_xgb)
+
+c(RMSE = rmse_xgb, MAE = mae_xgb)
+```
+
+### Initial overfitting model prior to tuning (ZD, KB)
+```{r}
+set.seed(123)
+
+# Zack's original attempt
+xgb_cv_of <- xgb.cv(
+  data = dtrain,
+  nrounds = 2000,
+  nfold = 5,
+  objective = "reg:squarederror",
+  eta = 0.01,
+  max_depth = 4,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  early_stopping_rounds = 50,
+  verbose = 0 # mute iterations
+)
+
+xgb_cv_of$best_iteration
+
+# Train model
+params_of <- list(
+  objective = "reg:squarederror",
+    eta = 0.01,
+    max_depth = 4,
+    subsample = 0.8,
+    colsample_bytree = 0.8
+)
+# Find best # of trees from cv
+best_xgb_of <- xgb.train(
+  params = params_of,
+  data = dtrain,
+  nrounds = xgb_cv_of$best_iteration #2000
+)
+```
+We can see that the XGBoost model performed best at 2000 trees according to cross-validation, with is hitting the max nrounds. 
+
+Checking to see if the model is overfitting (ZD, KB)
+```{r}
+# Overfitting?
+cv_rmse_of <- min(xgb_cv_of$evaluation_log$test_rmse_mean)
+train_rmse_of <- min(xgb_cv_of$evaluation_log$train_rmse_mean)
+
+data.frame(
+  Train_RMSE = train_rmse_of,
+  CV_RMSE = cv_rmse_of,
+  Test_RMSE = rmse_xgb
+)
+```
+We can see that the model is strongly overfitting because the train error (85) is alot lower than CV (184).
+
+
+### Introduce cross validation hyperparameter tuning (KB)
+Do this by running a tuning loop.
+
+To make sure our XGBoost model is as accurate and reliable as possible, we built a hyperparameter-tuning loop. We can use this instead of guessing which settings would give us the best performance. This loop is able to automatically test several combinations using 5-fold cross-validation. It then checks how well the model predicts on unseen data and records the best RMSE and number of boosting rounds. Then it selects the combination with the lowest cross-validated error. The tuning loop is a balanced model that is flexible enough to capture real patterns and its regularized enough to avoid memorizing all the noise.
+
+Need to undo the #'s if want to run the long loop. 
+```{r}
+#params_grid <- expand.grid(
+#  max_depth = c(2, 3, 4),
+#  min_child_weight = c(3, 5, 10),
+#  subsample = c(0.7, 0.8),
+#  colsample_bytree = c(0.6, 0.8),
+#  eta = c(0.05, 0.1),
+#  gamma = c(0, 0.1),
+#  lambda = c(0.5, 1),
+#  alpha = c(0, 1)
+#)
+
+#results <- list()
+
+#for (i in 1:nrow(params_grid)) {
+  
+#  params <- list(
+#    objective = "reg:squarederror",
+#    max_depth = params_grid$max_depth[i],
+#    min_child_weight = params_grid$min_child_weight[i],
+#    subsample = params_grid$subsample[i],
+#    colsample_bytree = params_grid$colsample_bytree[i],
+#    eta = params_grid$eta[i],
+#    gamma = params_grid$gamma[i],
+#    lambda = params_grid$lambda[i],
+#    alpha = params_grid$alpha[i]
+#  )
+  
+#  cv <- xgb.cv(
+#    params = params,
+#    data = dtrain,
+#    nrounds = 1500,
+#    nfold = 5,
+#    early_stopping_rounds = 30,
+#    verbose = 0
+#  )
+  
+#  results[[i]] <- list(
+#    params = params,
+#    best_rmse = min(cv$evaluation_log$test_rmse_mean),
+#    best_iter = cv$best_iteration
+#  )
+#}
+
+```
+
+Next extract the best hyperparameters (KB)
+
+Need to undo the #'s if want to run the long loop and see the best parameters and nrounds. 
+```{r}
+# Find the index of the combination with the lowest CV RMSE
+#best_index <- which.min(sapply(results, function(x) x$best_rmse))
+
+# Get the best parameters
+#best_params <- results[[best_index]]$params
+#best_params
+
+# Get the best number of boosting rounds
+#best_nrounds <- results[[best_index]]$best_iter
+#best_nrounds
+
+```
+
+### Running XGBoost model with the best hyperparameters explicitly added (KB)
+
+This way you don't have to run the tuning loop, since it takes up a lot of time (KB)
+```{r}
+set.seed(42)
+
+# Set best hyperparameters directly
+best_params <- list(
+  objective = "reg:squarederror",
+  max_depth = 4,
+  min_child_weight = 10,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  eta = 0.1,
+  gamma = 0,
+  lambda = 0.5,
+  alpha = 0
+)
+
+best_nrounds <- 1498   # from tuning
+
+# Train final XGBoost model
+xgb_model <- xgboost(
+  data   = dtrain,
+  params = best_params,
+  nrounds = best_nrounds,
+  verbose = FALSE
+)
+
+
+
+# Predictions on train and test sets
+pred_train <- predict(xgb_model, dtrain)
+pred_test  <- predict(xgb_model, dtest)
+
+
+# Train metrics
+rmse_train <- rmse(train_data$avg_chip_seconds, pred_train)
+mae_train <- mae(train_data$avg_chip_seconds, pred_train)
+rss_train <- sum((train_data$avg_chip_seconds - pred_train)^2)
+tss_train <- sum((train_data$avg_chip_seconds - mean(train_data$avg_chip_seconds))^2)
+r2_train  <- 1 - rss_train / tss_train
+
+
+# CV RMSE from tuning
+cv_rmse <- 151.6136  # manually use the CV RMSE from previous results
+
+
+# Test metrics
+rmse_test <- rmse(test_data$avg_chip_seconds, pred_test)
+mae_test  <- mae(test_data$avg_chip_seconds, pred_test)
+rss_test  <- sum((test_data$avg_chip_seconds - pred_test)^2)
+tss_test  <- sum((test_data$avg_chip_seconds - mean(test_data$avg_chip_seconds))^2)
+r2_test   <- 1 - rss_test / tss_test
+
+
+# Combine into a single table
+model_eval <- data.frame(
+  Metric = c("Train RMSE", "Train MAE", "Train R2",
+             "CV RMSE",
+             "Test RMSE", "Test MAE", "Test R2"),
+  Value  = c(rmse_train, mae_train, r2_train,
+             cv_rmse,
+             rmse_test, mae_test, r2_test)
+)
+
+# Display table
+knitr::kable(model_eval, digits = 4, caption = "XGBoost (Engineered Features) Model Best Hyperparameters - Overfitting Check")
+
+```
+
+**NOTE** Models may be slightly different with small fluctuations that are likely due to sampling variability.
+
+After tuning, our XGBoost model with engineered features shows substantial improvement over the baseline, though care should still be taken when interpreting training performance metrics.
+
+We can see that the model is not overfitting severely (Train RMSE = 40.44, Test RMSE = 144.10). The gap between train and test performance is smaller than in the original, untuned model (Train RMSE: ~86, Test RMSE: ~184), indicating a meaningful improvement in generalization.
+
+Cross-validation error is reasonably close to test error (CV RMSE = 151.61, Test RMSE = 144.10), which is encouraging. This suggests that our 5-fold CV is reliable, the model generalizes well, and there is no obvious data leakage.
+
+Both R² values indicate excellent fit (Train R² ≈ 0.9999, Test R² = 0.9983). The nearly perfect training R² is likely due to the engineered subgroup features capturing much of the variability, so it does not necessarily indicate overfitting.
+
+Overall, the tuned model clearly outperforms the baseline (Baseline Test RMSE ≈ 184, Tuned Test RMSE ≈ 144.10), representing roughly a **20–25% reduction in test error**. This demonstrates that the hyperparameter tuning and feature engineering were effective in improving predictive accuracy and stability.
+
+
+### Check for variable importance (ZD, KB)
+```{r}
+# Variable importance amongst final XGBoosted model
+importance <- xgb.importance(model = xgb_model)
+print(importance)
+
+xgb.plot.importance(importance)
+```
+We can see that the subgroups are
+
+## XGBoost model raw features (KB)
+
+No feature engineering or binning occurred on the main_data.
+```{r}
+str(main_data)
+```
+
+Add our 90/10 training/test split (ZD, KB)
+```{r}
+# split data into train and test
+set.seed(123)
+
+train_index <- sample(1:nrow(main_data), size = 0.9 * nrow(main_data)) # use a 90/10 split
+
+train_data_raw <- as.data.frame(main_data[train_index, ]) # making sure they are data frames
+test_data_raw  <- as.data.frame(main_data[-train_index, ])
+```
+
+Remove identifiers before creating model matrix (ZD, KB)
+```{r}
+# Convert dataset to numeric-only matrix
+train_matrix_raw <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = train_data_raw %>% select(-year, -n)
+)
+
+test_matrix_raw <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = test_data_raw %>% select(-year, -n)
+)
+
+# Convert to DMatrix format for tuning, needed for cross validation
+dtrain_raw <- xgb.DMatrix(data = train_matrix_raw, label = train_data_raw$avg_chip_seconds)
+dtest_raw  <- xgb.DMatrix(data = test_matrix_raw,  label = test_data_raw$avg_chip_seconds)
+```
+
+Creating the XGBoost Model(ZD, KB) 
+```{r}
+# Create an untuned XGBoost model
+xgb_base_raw <- xgboost(
+  data = dtrain_raw,
+  nrounds = 200,
+  objective = "reg:squarederror",
+  verbose = FALSE # mute iterations
+)
+
+pred_xgb_raw <- predict(xgb_base_raw, dtest_raw)
+
+rmse_xgb_raw <- rmse(test_data_raw$avg_chip_seconds, pred_xgb_raw)
+mae_xgb_raw  <- mae(test_data_raw$avg_chip_seconds, pred_xgb_raw)
+
+c(RMSE = rmse_xgb_raw, MAE = mae_xgb_raw)
+```
+
+**ADD HERE**
+
+This represents the initial overfitting model prior to tuning (ZD, KB)
+```{r}
+# Zack's original attempt
+xgb_cv_raw_of <- xgb.cv(
+  data = dtrain_raw,
+  nrounds = 2000,
+  nfold = 5,
+  objective = "reg:squarederror",
+  eta = 0.01,
+  max_depth = 4,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  early_stopping_rounds = 50,
+  verbose = 0 # mute iterations
+)
+
+xgb_cv_raw_of$best_iteration
+
+# Train model
+params_raw_of <- list(
+  objective = "reg:squarederror",
+  eta = 0.01,
+  max_depth = 4,
+  subsample = 0.8,
+  colsample_bytree = 0.8
+)
+# Find best # of trees from cv
+best_xgb_raw_of <- xgb.train(
+  params = params_raw_of,
+  data = dtrain_raw,
+  nrounds = xgb_cv_raw_of$best_iteration 
+)
+```
+We can see that the XGBoost model performed best at 2000 trees according to cross-validation, with is hitting the max nrounds. 
+
+Checking to see if the model is overfitting (ZD, KB)
+```{r}
+# Overfitting?
+cv_rmse_raw_of <- min(xgb_cv_raw_of$evaluation_log$test_rmse_mean)
+train_rmse_raw_of <- min(xgb_cv_raw_of$evaluation_log$train_rmse_mean)
+
+data.frame(
+  Train_RMSE = train_rmse_raw_of,
+  CV_RMSE = cv_rmse_raw_of,
+  Test_RMSE = rmse_xgb_raw
+)
+```
+We can see that the model is strongly overfitting because the train error (92) is a lot lower than CV (163).
+
+
+## Introduce cross validation hyperparameter tuning (KB)
+Do this by first running a tuning loop on the raw features as done previously (KB)
+
+To make sure our XGBoost raw features model is as accurate and reliable as possible, we built a hyperparameter-tuning loop. We can use this instead of guessing which settings would give us the best performance. This loop is able to automatically test several combinations using 5-fold cross-validation. It then checks how well the model predicts on unseen data and records the best RMSE and number of boosting rounds. Then it selects the combination with the lowest cross-validated error. The tuning loop is a balanced model that is flexible enough to capture real patterns and its regularized enough to avoid memorizing all the noise.
+
+Need to undo the #'s if want to run the long loop. 
+```{r}
+#params_grid_raw <- expand.grid(
+#  max_depth = c(2, 3, 4),
+#  min_child_weight = c(3, 5, 10),
+#  subsample = c(0.7, 0.8),
+#  colsample_bytree = c(0.6, 0.8),
+#  eta = c(0.05, 0.1),
+#  gamma = c(0, 0.1),
+#  lambda = c(0.5, 1),
+#  alpha = c(0, 1)
+#)
+
+#results_raw <- list()
+
+#for (i in 1:nrow(params_grid_raw)) {
+  
+#  params <- list(
+#    objective = "reg:squarederror",
+#    max_depth = params_grid_raw$max_depth[i],
+#     min_child_weight = params_grid_raw$min_child_weight[i],
+#    subsample = params_grid_raw$subsample[i],
+#    colsample_bytree = params_grid_raw$colsample_bytree[i],
+#    eta = params_grid_raw$eta[i],
+#    gamma = params_grid_raw$gamma[i],
+#    lambda = params_grid_raw$lambda[i],
+#    alpha = params_grid_raw$alpha[i]
+#  )
+  
+#  cv_raw <- xgb.cv(
+#    params = params,
+#    data = dtrain_raw,      
+#    nrounds = 1500,
+#    nfold = 5,
+#    early_stopping_rounds = 30,
+#    verbose = 0
+#  )
+  
+#  results_raw[[i]] <- list(
+#    params = params,
+#    best_rmse = min(cv_raw$evaluation_log$test_rmse_mean),
+#    best_iter = cv_raw$best_iteration
+#  )
+#}
+
+```
+
+
+Next extract the best hyperparameters (KB)
+
+Need to undo the #'s if want to run the long loop and see the best parameters and nrounds. 
+```{r}
+# Find the index of the combination with the lowest CV RMSE
+#best_index_raw <- which.min(sapply(results_raw, function(x) x$best_rmse))
+
+# Get the best parameters
+#best_params_raw <- results_raw[[best_index_raw]]$params
+#best_params_raw
+
+# Get the best number of boosting rounds
+#best_nrounds_raw <- results_raw[[best_index_raw]]$best_iter
+#best_nrounds_raw
+
+```
+
+
+Running XGBoost raw feature model with the best hyperparameters explicitly added, so you no longer need any tuning loop since it takes up a lot of time (KB)
+```{r}
+set.seed(42)
+
+# Set best hyperparameters directly
+best_params_raw <- list(
+  objective = "reg:squarederror",
+  max_depth = 4,
+  min_child_weight = 10,
+  subsample = 0.7,
+  colsample_bytree = 0.8,
+  eta = 0.1,
+  gamma = 0,
+  lambda = 1,
+  alpha = 0
+)
+
+best_nrounds_raw <- 1498  # optimal rounds from CV
+
+# Train final XGBoost model
+xgb_raw_model <- xgboost(
+  data = dtrain_raw,
+  params = best_params_raw,
+  nrounds = best_nrounds_raw,
+  verbose = FALSE
+)
+
+# Predictions on train and test sets
+pred_train_raw <- predict(xgb_raw_model, dtrain_raw)
+pred_test_raw  <- predict(xgb_raw_model, dtest_raw)
+
+# Train metrics (use train_data_raw)
+rmse_train <- rmse(train_data_raw$avg_chip_seconds, pred_train_raw)
+mae_train  <- mae(train_data_raw$avg_chip_seconds, pred_train_raw)
+rss_train  <- sum((train_data_raw$avg_chip_seconds - pred_train_raw)^2)
+tss_train  <- sum((train_data_raw$avg_chip_seconds - mean(train_data_raw$avg_chip_seconds))^2)
+r2_train   <- 1 - rss_train / tss_train
+
+# CV RMSE from previous tuning
+cv_rmse <- 164.6655  # manually use CV RMSE from previous results
+
+# Test metrics (use test_data_raw)
+rmse_test <- rmse(test_data_raw$avg_chip_seconds, pred_test_raw)
+mae_test  <- mae(test_data_raw$avg_chip_seconds, pred_test_raw)
+rss_test  <- sum((test_data_raw$avg_chip_seconds - pred_test_raw)^2)
+tss_test  <- sum((test_data_raw$avg_chip_seconds - mean(test_data_raw$avg_chip_seconds))^2)
+r2_test   <- 1 - rss_test / tss_test
+
+# Combine into a single table
+model_eval <- data.frame(
+  Metric = c("Train RMSE", "Train MAE", "Train R2",
+             "CV RMSE",
+             "Test RMSE", "Test MAE", "Test R2"),
+  Value  = c(rmse_train, mae_train, r2_train,
+             cv_rmse,
+             rmse_test, mae_test, r2_test)
+)
+
+# Display table
+knitr::kable(
+  model_eval, 
+  digits = 4, 
+  caption = "XGBoost Raw-Feature Model Best Hyperparameters - Overfitting Check (Train MAE & R2 included)"
+)
+
+```
+
+**NOTE** Models may be slightly different with small fluctuations that are likely due to sampling variability.
+
+After tuning, our XGBoost model shows substantial improvement over the baseline, but some caution is still warranted regarding overfitting, so care should be taken when interpreting training performance metrics.
+
+We can see that the model is not overfitting severely, only to a reasonable extent (Train RMSE ≈ 56.54, Test RMSE ≈ 136.68). The gap between train and test performance is expected and much smaller than in the baseline model (Train RMSE ≈ 92.52, Test RMSE ≈ 163.04). This indicates that regularization and hyperparameter tuning have helped reduce the degree of overfitting.
+
+We also can see that the cross-validation error is very similar to the test error (CV RMSE ≈ 164.67, Test RMSE ≈ 136.68). This is good because it means that the model is stable across folds, the cross-validation process is reliable, and the model is generalizing consistently. This also suggests there is no obvious data leakage.
+
+In addition, both R² scores show that the model fits the data extremely well (Train R² ≈ 0.9997, Test R² ≈ 0.9983). The almost perfect R² is likely due to the subgroup structure and engineered features, rather than overfitting.
+
+Overall, the tuned model clearly outperforms the baseline model. The baseline had a Test RMSE of about 163.04, whereas the tuned model achieves 136.68, which is a meaningful improvement in accuracy. This represents roughly a **16% reduction in test error**, showing that the tuning loop successfully improved generalization and stability.
+
+
+Check for variable importance (ZD, KB)
+```{r}
+# Variable importance amongst final XGBoosted model
+importance <- xgb.importance(model = xgb_raw_model)
+print(importance)
+
+xgb.plot.importance(importance)
+```
+(ADD HERE)
+
+
+# Comparison of models (KB)
+```{r}
+# Comparison table of Raw vs Engineered XGBoost models
+comparison_table <- data.frame(
+  Metric = c(
+    "Train RMSE", "Train MAE", "Train R²",
+    "CV RMSE",
+    "Test RMSE", "Test MAE", "Test R²"
+  ),
+  Raw_Feature_Model = c(
+    56.5368, 42.5066, 0.9997,
+    164.6655,
+    136.6817, 101.9962, 0.9983
+  ),
+  Engineered_Feature_Model = c(
+    49.2031, 36.1951, 0.9998,
+    151.6136,
+    149.5008, 100.9366, 0.9982
+  )
+)
+
+# Display table
+knitr::kable(
+  comparison_table,
+  digits = 4,
+  caption = "Comparison of XGBoost Raw-Feature vs Engineered-Feature Models"
+)
+
+```
+
+After evaluating both the raw-feature and engineered-feature XGBoost models, we can see some clear differences in performance/stability.
+
+The engineered-feature model has a lower training error (Train RMSE ≈ 49.20, Train MAE ≈ 36.20) and slightly better cross-validation performance (CV RMSE ≈ 151.61) compared to the raw-feature model (Train RMSE ≈ 56.54, Train MAE ≈ 42.51, CV RMSE ≈ 164.67). This means that the engineered features help the model fit the training data more accurately and generalize more consistently across folds.
+
+Interestingly, the raw-feature model shows slightly better test performance (Test RMSE ≈ 136.68, Test MAE ≈ 102.00) than the engineered-feature model (Test RMSE ≈ 149.50, Test MAE ≈ 100.94). However, its higher CV RMSE suggests that this improvement might be due to other things, possibly the variability in the specific train-test split. This makes it potentially less stable across different subsets of the data.
+
+Both models have extremely high R2 on the training and test sets (≈0.998–0.999). This means that they are able to capture nearly all variability in the target. Overall, the engineered-feature model is recommended if stability and consistent generalization are priorities, while the raw-feature model may give slightly lower observed test error in this particular split but could be less reliable on new data.
+
+
+------------------------
+# Inactive / Archived Code
+
+  ``` Contains code ideas that were not used.
+  ```
+  
+indicate and define year of covid (ZD)
+final_data <- final_data %>%
+  mutate(
+    covid_era = ifelse(year == 2020, 1, 0)
+  )
+
+
+replacing the numeric variables with missing data with mean (could do median if we keep this); most likely dropping though (ZD)
+numeric_vars <- final_data %>%
+  select(where(is.numeric)) %>%
+  names()
+
+final_data <- final_data %>%
+  mutate(across(all_of(numeric_vars), ~ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+
+
+create custom cutoff times for performance groups (ZD)
+final_data <- final_data %>%
+  mutate(
+    finish_hours = avg_chip_seconds / 3600, # think we are having all time in seconds, need fixing
+    subgroup2 = case_when(
+      finish_hours < 3 ~ "elite",
+      finish_hours < 3.75 ~ "competitive",
+      finish_hours < 4.75 ~ "average",
+      finish_hours < 5.75 ~ "recreational",
+      TRUE ~ "slow"
+    )
+  )
