@@ -701,6 +701,9 @@ train_data_raw <- as.data.frame(main_data[train_index, ]) # making sure they are
 test_data_raw  <- as.data.frame(main_data[-train_index, ])
 ```
 
+
+
+
 Remove identifiers before creating model matrix (ZD, KB)
 ```{r}
 # Convert dataset to numeric-only matrix
@@ -989,6 +992,85 @@ Both models have extremely high R2 on the training and test sets (≈0.998–0.9
 
 ENDED HERE (KB)
 
+
+
+#BERLIN TEST
+Next we tested the model on the Berlin data
+```{r}
+berlin_data <- final_data %>% filter(marathon == "Berlin")
+
+# Training data 
+berlin_data$ozone_bin <- ifelse(berlin_data$ozone >= 38, 1, 0)
+berlin_data$ozone_bin <- factor(berlin_data$ozone_bin, levels = c(0, 1))
+berlin_data$pm25_bin  <- ifelse(berlin_data$pm25 >= 54, 1, 0)
+berlin_data$pm25_bin <- factor(berlin_data$ozone_bin, levels = c(0, 1))
+
+
+# Remove ozone and pm25 from training and test data
+berlin_data <- berlin_data[, !(names(berlin_data) %in% c("ozone", "pm25"))]
+
+#remove visibility, co, pm10, pm25_bin
+berlin_data <- berlin_data %>%
+  select(-pm25_bin, -pm10, -co, -visibility,-main_pollutant, -ozone_bin)
+
+berlin_data$supershoe = ifelse(berlin_data$year >= 2018, 1, 0)
+
+berlin_data$supershoe <- factor(berlin_data$supershoe)
+berlin_data$marathon <- factor(berlin_data$marathon)
+berlin_data$gender   <- factor(berlin_data$gender)
+berlin_data$subgroup <- factor(berlin_data$subgroup)
+
+
+# Build test matrix USING training terms
+test_matrix <- model.matrix(
+  terms(train_matrix),
+  data = berlin_test %>% select(-year, -n)
+)
+
+# Create DMatrix
+dtrain <- xgb.DMatrix(train_matrix, label = berlin_train$avg_chip_seconds)
+dtest  <- xgb.DMatrix(test_matrix)
+
+
+# Convert dataset to numeric-only matrix
+berlin_data_matrix <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = berlin_data %>% select(-year, -n, -marathon)
+)
+
+dberlin_test  <- xgb.DMatrix(data = berlin_data_matrix,  label = berlin_data$avg_chip_seconds)
+pred_test  <- predict(xgb_model, dberlin_test)
+
+
+# Berlin Testing metrics
+rmse_berlin <- rmse(berlin_data$avg_chip_seconds, pred_train)
+mae_berlin <- mae(berlin_data$avg_chip_seconds, pred_train)
+rss_berlin <- sum((berlin_data$avg_chip_seconds - pred_train)^2)
+tss_berlin <- sum((berlin_data$avg_chip_seconds - mean(berlin_data$avg_chip_seconds))^2)
+r2_berlin  <- 1 - rss_train / tss_train
+
+
+
+# Combine into a single table
+model_eval <- data.frame(
+  Metric = c("Berlin RMSE", "Berlin MAE", "Berlin R2"),
+  Value  = c(rmse_berlin, mae_berlin, r2_berlin)
+)
+
+# Display table
+knitr::kable(model_eval, digits = 4, caption = "XGBoost (Engineered Features) Model Best Hyperparameters - Berlin")
+```
+
+
+
+
+
+
+
+
+
+
+
 (probably dont need this since i guest the parameters (KB))
 Introduce cross validation hyperparameter tuning (ZD, KB)
 ```{r}
@@ -1141,6 +1223,70 @@ theme_minimal()
 
 We can now see that the model is no longer overfitting. 
 
+
+
+
+
+
+
+
+
+
+#Graphing gain, cover and frequency for best XGBoost (MH)
+```{r}
+
+
+importance_Model <- xgb.importance(model = xgb_model)
+importance_Model
+
+# Variable importance
+gain_fig_xgb <- xgb.plot.importance(importance_Model, measure ="Gain") 
+cover_fig_xgb <- xgb.plot.importance(importance_Model, measure ="Cover") 
+freq_fig_xgb <- xgb.plot.importance(importance_Model, measure ="Frequency")
+
+
+#Used ChatGPT since I couldn't figure out how to add labels to the xgb.plot.importance() function
+gain_fig <- ggplot(importance_Model, aes(x = reorder(Feature, Gain), y = Gain)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance by Gain",
+    x = "Feature",
+    y = "Importance Score"
+  ) +
+  theme_minimal()
+
+print(gain_fig)
+
+
+cover_fig <- ggplot(importance_Model, aes(x = reorder(Feature, Cover), y = Cover)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance by Cover",
+    x = "Feature",
+    y = "Importance Score"
+  ) +
+  theme_minimal()
+
+print(cover_fig)
+
+ 
+freq_fig <- ggplot(importance_Model, aes(x = reorder(Feature, Cover), y = Frequency)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance by Frequency",
+    x = "Feature",
+    y = "Importance Score"
+  ) +
+  theme_minimal()
+
+print(freq_fig)
+
+```
+
+
 Implement SHAP (ZD)
 
 ```{r}
@@ -1148,13 +1294,13 @@ Implement SHAP (ZD)
 library(SHAPforxgboost)   # we can move this library to the beginning after ensuring this chunk is needed
 # Compute SHAP values for the raw XGB model
 shap_values <- shap.values(
-  xgb_model = best_xgb_raw,
-  X_train = train_matrix_raw
+  xgb_model = xgb_model,
+  X_train = train_matrix
 )
 
 shap_long <- shap.prep( # convert SHAP values to long format
-  xgb_model = best_xgb_raw,
-  X_train = train_matrix_raw
+  xgb_model = xgb_model,
+  X_train = train_matrix
 )
 shap.plot.summary(shap_long)
 ```
@@ -1167,18 +1313,18 @@ Marathon location proves to be important in determining race results. Elite runn
 
 ```{r}
 # PM2.5 effect by subgroup
-shap.plot.dependence(
-  shap_long,
-  x = "pm25",
-  color_feature = "subgroup"
-)
+#shap.plot.dependence(
+#  shap_long,
+#  x = "pm25_bin",
+#  color_feature = "subgroup"
+#)
 
 #Because we want to color by subgroup and our subgroups are one-hot encoded, the best way we found to do this is extrapolate for each one-hot encoded group and plot all together with ggplot
 
 #plot for elite subgroup
 elite <- shap.plot.dependence(
   shap_long,
-  x = "pm25",
+  x = "pm25_bin1",
   color_feature = "subgroupelite"
 )
 #SHAP values broken down by 1 (elite) or 0 (not-elite) and relevant color.
@@ -1187,7 +1333,7 @@ elite_points <- elite$data
 #repeated for competitive subgroup
 comp <- shap.plot.dependence(
   shap_long,
-  x = "pm25",
+  x = "pm25_bin1",
   color_feature = "subgroupcompetitive"
 )
 comp_points <- comp$data
@@ -1195,7 +1341,7 @@ comp_points <- comp$data
 #repeated for recreational subgroup
 rec <- shap.plot.dependence(
   shap_long,
-  x = "pm25",
+  x = "pm25_bin1",
   color_feature = "subgrouprecreational"
 )
 rec_points <- rec$data
@@ -1203,7 +1349,7 @@ rec_points <- rec$data
 #repeated for slow subgroup
 slow <- shap.plot.dependence(
   shap_long,
-  x = "pm25",
+  x = "pm25_bin1",
   color_feature = "subgroupslow"
 )
 slow_points <- slow$data
@@ -1228,7 +1374,7 @@ all_points <- rbind(elite_points, comp_points, rec_points, slow_points)
 #plot each subgroup and relevant SHAP values
 ggplot(all_points, aes(x = x_feature, y = value, color = group)) +
   geom_point(alpha = 0.4) +
-  geom_smooth(se = FALSE, size = 0.8) +   # one smooth line per group
+  geom_smooth(se = FALSE, linewidth = 0.8) +   # one smooth line per group
   scale_color_manual(values = c(
     "Elite" = "#3B77BC",
     "Comp"  = "#E1BE6A",
@@ -1238,7 +1384,7 @@ ggplot(all_points, aes(x = x_feature, y = value, color = group)) +
   breaks = c("Elite", "Comp", "Rec", "Slow") 
   ) +
   theme_minimal() +
-  labs(x = "pm25", y = "SHAP value", color = "Group")
+  labs(x = "PM2.5", y = "SHAP value", color = "Group")
 
 ```
 
@@ -1361,7 +1507,7 @@ Temperature displays a much clearer impact than the PM2.5 results. At lower temp
 #plot for elite subgroup
 elite <- shap.plot.dependence(
   shap_long,
-  x = "ozone",
+  x = "ozone_bin1",
   color_feature = "subgroupelite"
 )
 #SHAP values broken down by 1 (elite) or 0 (not-elite) and relevant color.
@@ -1370,7 +1516,7 @@ elite_points <- elite$data
 #repeated for competitive subgroup
 comp <- shap.plot.dependence(
   shap_long,
-  x = "ozone",
+  x = "ozone_bin1",
   color_feature = "subgroupcompetitive"
 )
 comp_points <- comp$data
@@ -1378,7 +1524,7 @@ comp_points <- comp$data
 #repeated for recreational subgroup
 rec <- shap.plot.dependence(
   shap_long,
-  x = "ozone",
+  x = "ozone_bin1",
   color_feature = "subgrouprecreational"
 )
 rec_points <- rec$data
@@ -1386,7 +1532,7 @@ rec_points <- rec$data
 #repeated for slow subgroup
 slow <- shap.plot.dependence(
   shap_long,
-  x = "ozone",
+  x = "ozone_bin1",
   color_feature = "subgroupslow"
 )
 slow_points <- slow$data
@@ -1693,8 +1839,104 @@ ggplot(all_points, aes(x = x_feature, y = value, color = group)) +
   labs(x = "CO", y = "SHAP value", color = "Group")
 ```
 
+```{r}
+#plot for elite subgroup
+elite <- shap.plot.dependence(
+  shap_long,
+  x = "temp_aqi_interaction",
+  color_feature = "subgroupelite"
+)
+#SHAP values broken down by 1 (elite) or 0 (not-elite) and relevant color.
+elite_points <- elite$data
+
+#repeated for competitive subgroup
+comp <- shap.plot.dependence(
+  shap_long,
+  x = "temp_aqi_interaction",
+  color_feature = "subgroupcompetitive"
+)
+comp_points <- comp$data
+
+#repeated for recreational subgroup
+rec <- shap.plot.dependence(
+  shap_long,
+  x = "temp_aqi_interaction",
+  color_feature = "subgrouprecreational"
+)
+rec_points <- rec$data
+
+#repeated for slow subgroup
+slow <- shap.plot.dependence(
+  shap_long,
+  x = "temp_aqi_interaction",
+  color_feature = "subgroupslow"
+)
+slow_points <- slow$data
 
 
+
+#subset so each dataset hase color_value = 1 (the dataframe's positive subroup)
+elite_points <- subset(elite_points, color_value == 1)
+comp_points <- subset(comp_points, color_value == 1)
+rec_points <- subset(rec_points, color_value == 1)
+slow_points <- subset(slow_points, color_value == 1)
+
+#add group to each dataframe for merge
+elite_points$group <- "Elite"
+comp_points$group  <- "Comp"
+rec_points$group   <- "Rec"
+slow_points$group  <- "Slow"
+
+#merge
+all_points <- rbind(elite_points, comp_points, rec_points, slow_points)
+
+#plot each subgroup and relevant SHAP values
+ggplot(all_points, aes(x = x_feature, y = value, color = group)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(se = FALSE, size = 0.8) +   # one smooth line per group
+  scale_color_manual(values = c(
+    "Elite" = "#3B77BC",
+    "Comp"  = "#E1BE6A",
+    "Rec"   = "#55A868",
+    "Slow"  = "#C44E52"
+  ),
+  breaks = c("Elite", "Comp", "Rec", "Slow") 
+  ) +
+  theme_minimal() +
+  labs(x = "TempXAQI", y = "SHAP value", color = "Group")
+```
+```{r}
+#plot for gender:male 
+gender <- shap.plot.dependence(
+  shap_long,
+  x = "temp_aqi_interaction",
+  color_feature = "gendermale"
+)
+#SHAP values broken down by 1 (male) or 0 (female) and relevant color.
+gender_points <- gender$data
+
+gender_points$color_value <- factor(
+  gender_points$color_value,
+  levels = c(0, 1),
+  labels = c("Female", "Male")
+)
+
+
+#plot each subgroup and relevant SHAP values
+ggplot(gender_points, aes(x = x_feature, y = value, color = color_value)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "loess", se = FALSE, size = 1.2) +
+  scale_color_manual(
+    values = c("Female" = "#E69F00", "Male" = "#0072B2")
+  ) +
+  labs(
+    x = "TempXAQI",
+    y = "SHAP value",
+    color = "Gender"
+  ) +
+  theme_minimal()
+
+```
 
 
 (ZD)
@@ -1790,55 +2032,7 @@ plot(pdp_ozone)
 
 ```
 
-#Graphing gain, cover and frequency for best XGBoost (MH)
 
-```{r}
-# Variable importance
-gain_fig_xgb <- xgb.plot.importance(importance_raw, measure ="Gain") 
-cover_fig_xgb <- xgb.plot.importance(importance_raw, measure ="Cover") 
-freq_fig_xgb <- xgb.plot.importance(importance_raw, measure ="Frequency")
-
-
-#Used ai since I couldn't figure out how to add labels to the xgb.plot.importance() function
-gain_fig <- ggplot(importance_raw, aes(x = reorder(Feature, Gain), y = Gain)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  coord_flip() +
-  labs(
-    title = "Feature Importance by Gain",
-    x = "Feature",
-    y = "Importance Score"
-  ) +
-  theme_minimal()
-
-print(gain_fig)
-
-
-cover_fig <- ggplot(importance_raw, aes(x = reorder(Feature, Cover), y = Cover)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  coord_flip() +
-  labs(
-    title = "Feature Importance by Cover",
-    x = "Feature",
-    y = "Importance Score"
-  ) +
-  theme_minimal()
-
-print(cover_fig)
-
- 
-freq_fig <- ggplot(importance_raw, aes(x = reorder(Feature, Cover), y = Frequency)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  coord_flip() +
-  labs(
-    title = "Feature Importance by Frequency",
-    x = "Feature",
-    y = "Importance Score"
-  ) +
-  theme_minimal()
-
-print(freq_fig)
-
-```
 
 
 
