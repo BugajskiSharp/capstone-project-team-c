@@ -1638,7 +1638,7 @@ plot(lm_initial_PM25bin, which = 2)   # Q–Q plot
 
 # XGBoost Models (KB, ZD, MH)
 
-## XGBoost feature engineered model (KB, ZD
+## XGBoost feature engineered model (KB, ZD)
 
 Add our 90/10 training/test split with no scaling (ZD)
 ```{r}
@@ -1693,12 +1693,16 @@ test_matrix <- model.matrix(
   data = test_data %>% select(-year, -n)
 )
 
+# Remove intercept from both matrices
+train_matrix <- train_matrix[, colnames(train_matrix) != "(Intercept)"]
+test_matrix  <- test_matrix[,  colnames(test_matrix)  != "(Intercept)"]
+
 # Convert to DMatrix format for tuning, needed for cross validation
 dtrain <- xgb.DMatrix(data = train_matrix, label = train_data$avg_chip_seconds)
 dtest  <- xgb.DMatrix(data = test_matrix,  label = test_data$avg_chip_seconds)
 ```
 
-Create an untuned XGBoost model (ZD)
+# Create our inital untuned basline XGBoost model (ZD, KB)
 ```{r}
 xgb_base <- xgboost(
   data = dtrain,
@@ -1707,65 +1711,44 @@ xgb_base <- xgboost(
   verbose = FALSE # mute iterations
 )
 
-pred_xgb <- predict(xgb_base, dtest)
+# Predictions on training and testing data
+pred_train_xgb <- predict(xgb_base, dtrain)
+pred_test_xgb <- predict(xgb_base, dtest)
 
-rmse_xgb <- rmse(test_data$avg_chip_seconds, pred_xgb)
-mae_xgb  <- mae(test_data$avg_chip_seconds, pred_xgb)
+# Training metrics
+rmse_train <- rmse(train_data$avg_chip_seconds, pred_train_xgb)
+mae_train  <- mae(train_data$avg_chip_seconds, pred_train_xgb)
 
-c(RMSE = rmse_xgb, MAE = mae_xgb)
+# Testing metrics
+rmse_xgb <- rmse(test_data$avg_chip_seconds, pred_test_xgb)
+mae_xgb  <- mae(test_data$avg_chip_seconds, pred_test_xgb)
+
+# Calculate R-squared for train data
+rss_train <- sum((train_data$avg_chip_seconds - pred_train_xgb)^2)
+tss_train <- sum((train_data$avg_chip_seconds - mean(train_data$avg_chip_seconds))^2)
+r2_train <- 1 - (rss_train / tss_train)
+
+# Calculate R-squared for test data
+rss_test <- sum((test_data$avg_chip_seconds - pred_xgb)^2)  # Residual sum of squares
+tss_test <- sum((test_data$avg_chip_seconds - mean(test_data$avg_chip_seconds))^2)  # Total sum of squares
+r2_xgb <- 1 - (rss / tss)
+
+
+# Combine metrics into a single table
+model_eval <- data.frame(
+  Metric = c("Train RMSE", "Train MAE", "Train R2",
+             "Test RMSE", "Test MAE", "Test R2"),
+  Value  = c(rmse_train, mae_train, r2_train,        
+             rmse_test, mae_test, r2_test)
+)
+
+# Display table nicely
+knitr::kable(model_eval, digits = 4, 
+             caption = "Basline XGBoost Model")
+
 ```
 
-### Initial overfitting model prior to tuning (ZD, KB)
-```{r}
-set.seed(123)
-
-# Zack's original attempt
-xgb_cv_of <- xgb.cv(
-  data = dtrain,
-  nrounds = 2000,
-  nfold = 5,
-  objective = "reg:squarederror",
-  eta = 0.01,
-  max_depth = 4,
-  subsample = 0.8,
-  colsample_bytree = 0.8,
-  early_stopping_rounds = 50,
-  verbose = 0 # mute iterations
-)
-
-xgb_cv_of$best_iteration
-
-# Train model
-params_of <- list(
-  objective = "reg:squarederror",
-    eta = 0.01,
-    max_depth = 4,
-    subsample = 0.8,
-    colsample_bytree = 0.8
-)
-# Find best # of trees from cv
-best_xgb_of <- xgb.train(
-  params = params_of,
-  data = dtrain,
-  nrounds = xgb_cv_of$best_iteration #2000
-)
-```
-We can see that the XGBoost model performed best at 2000 trees according to cross-validation, with is hitting the max nrounds. 
-
-Checking to see if the model is overfitting (ZD, KB)
-```{r}
-# Overfitting?
-cv_rmse_of <- min(xgb_cv_of$evaluation_log$test_rmse_mean)
-train_rmse_of <- min(xgb_cv_of$evaluation_log$train_rmse_mean)
-
-data.frame(
-  Train_RMSE = train_rmse_of,
-  CV_RMSE = cv_rmse_of,
-  Test_RMSE = rmse_xgb
-)
-```
-We can see that the model is strongly overfitting because the train error (85) is alot lower than CV (184).
-
+We can see that the baseline XGBoost model fits the training data almost perfectly, with a very low RMSE of 4.37 and an R2 of 1.0. However, its performance drops sharply on cross validation and test data (RMSEs around 152–165), which shows the model is overfitting and memorizing the training data rather than learning patterns that generalize. While the test R2 is still high, the large absolute errors mean predictions on new data would likely be unreliable. Overall, the model works great on the data it has seen but struggles when faced with unseen examples.
 
 ### Introduce cross validation hyperparameter tuning (KB)
 Do this by running a tuning loop.
@@ -1911,13 +1894,13 @@ knitr::kable(model_eval, digits = 4, caption = "XGBoost (Engineered Features) Mo
 
 After tuning, our XGBoost model with engineered features shows substantial improvement over the baseline, though care should still be taken when interpreting training performance metrics.
 
-We can see that the model is not overfitting severely (Train RMSE = 40.44, Test RMSE = 144.10). The gap between train and test performance is smaller than in the original, untuned model (Train RMSE: ~86, Test RMSE: ~184), indicating a meaningful improvement in generalization.
+Although hyperparameter tuning substantially reduced test RMSE, the gap between training and test performance still remains large. This suggests that tuning improved overall predictive accuracy but did not fully eliminate overfitting, which is likely due to the small dataset.
 
-Cross-validation error is reasonably close to test error (CV RMSE = 151.61, Test RMSE = 144.10), which is encouraging. This suggests that our 5-fold CV is reliable, the model generalizes well, and there is no obvious data leakage.
+Cross-validation error is reasonably close to test error (CV RMSE = 151.61, Test RMSE = 138.40), which is encouraging. This indicates that the 5-fold CV is reliable, the model generalizes well, and there is no obvious data leakage.
 
-Both R² values indicate excellent fit (Train R² ≈ 0.9999, Test R² = 0.9983). The nearly perfect training R² is likely due to the engineered subgroup features capturing much of the variability, so it does not necessarily indicate overfitting.
+Both R2 values indicate excellent fit (Train R2 ≈ 0.9998, Test R2 = 0.9984). The nearly perfect training R2 is likely a result of engineered subgroup features capturing much of the variability.
 
-Overall, the tuned model clearly outperforms the baseline (Baseline Test RMSE ≈ 184, Tuned Test RMSE ≈ 144.10), representing roughly a **20–25% reduction in test error**. This demonstrates that the hyperparameter tuning and feature engineering were effective in improving predictive accuracy and stability.
+Overall, the tuned model outperforms the baseline, reducing test RMSE from ~151.7 to ~138.4 (~8.8% reduction), improving predictive accuracy and stability. While training performance remains very strong, the model still shows some overfitting, likely due to the small dataset.
 
 
 ### Check for variable importance (ZD, KB)
@@ -1928,7 +1911,8 @@ print(importance)
 
 xgb.plot.importance(importance)
 ```
-We can see that the subgroups are
+We can see that subgroupslow and subgroupelite are the features the model relied on most to reduce prediction error. Variables like avg_temp or sea_level_pressure are less influential but still contribute a little. Features with extremely low Frequency are ozone_bin1, precipitation, and visibility, which are barely used by the model. 
+
 
 ## XGBoost model raw features (KB)
 
@@ -1961,14 +1945,18 @@ test_matrix_raw <- model.matrix(
   data = test_data_raw %>% select(-year, -n)
 )
 
+# Remove intercept from both matrices
+train_matrix_raw <- train_matrix_raw[, colnames(train_matrix_raw) != "(Intercept)"]
+test_matrix_raw  <- test_matrix_raw[,  colnames(test_matrix_raw)  != "(Intercept)"]
+
+
 # Convert to DMatrix format for tuning, needed for cross validation
 dtrain_raw <- xgb.DMatrix(data = train_matrix_raw, label = train_data_raw$avg_chip_seconds)
 dtest_raw  <- xgb.DMatrix(data = test_matrix_raw,  label = test_data_raw$avg_chip_seconds)
 ```
 
-Creating the XGBoost Model(ZD, KB) 
+# Create our inital untuned basline for the raw features XGBoost model (ZD, KB)
 ```{r}
-# Create an untuned XGBoost model
 xgb_base_raw <- xgboost(
   data = dtrain_raw,
   nrounds = 200,
@@ -1976,64 +1964,43 @@ xgb_base_raw <- xgboost(
   verbose = FALSE # mute iterations
 )
 
-pred_xgb_raw <- predict(xgb_base_raw, dtest_raw)
+# Predictions on training and testing data
+pred_train_xgb_raw <- predict(xgb_base_raw, dtrain_raw)
+pred_test_xgb_raw  <- predict(xgb_base_raw, dtest_raw)
 
-rmse_xgb_raw <- rmse(test_data_raw$avg_chip_seconds, pred_xgb_raw)
-mae_xgb_raw  <- mae(test_data_raw$avg_chip_seconds, pred_xgb_raw)
+# Training metrics
+rmse_train_raw <- rmse(train_data_raw$avg_chip_seconds, pred_train_xgb_raw)
+mae_train_raw  <- mae(train_data_raw$avg_chip_seconds, pred_train_xgb_raw)
 
-c(RMSE = rmse_xgb_raw, MAE = mae_xgb_raw)
+# Testing metrics
+rmse_test_raw <- rmse(test_data_raw$avg_chip_seconds, pred_test_xgb_raw)
+mae_test_raw  <- mae(test_data_raw$avg_chip_seconds, pred_test_xgb_raw)
+
+# Calculate R-squared for train data
+rss_train_raw <- sum((train_data_raw$avg_chip_seconds - pred_train_xgb_raw)^2)
+tss_train_raw <- sum((train_data_raw$avg_chip_seconds - mean(train_data_raw$avg_chip_seconds))^2)
+r2_train_raw <- 1 - (rss_train_raw / tss_train_raw)
+
+# Calculate R-squared for test data
+rss_test_raw <- sum((test_data_raw$avg_chip_seconds - pred_test_xgb_raw)^2)
+tss_test_raw <- sum((test_data_raw$avg_chip_seconds - mean(test_data_raw$avg_chip_seconds))^2)
+r2_test_raw <- 1 - (rss_test_raw / tss_test_raw)
+
+# Combine metrics into a single table
+model_eval_raw <- data.frame(
+  Metric = c("Train RMSE", "Train MAE", "Train R2",
+             "Test RMSE", "Test MAE", "Test R2"),
+  Value  = c(rmse_train_raw, mae_train_raw, r2_train_raw,
+             rmse_test_raw, mae_test_raw, r2_test_raw)
+)
+
+# Display table nicely
+knitr::kable(model_eval_raw, digits = 4, 
+             caption = "Untuned Baseline XGBoost Model (Raw Features)")
+
 ```
 
-**ADD HERE**
-
-This represents the initial overfitting model prior to tuning (ZD, KB)
-```{r}
-# Zack's original attempt
-xgb_cv_raw_of <- xgb.cv(
-  data = dtrain_raw,
-  nrounds = 2000,
-  nfold = 5,
-  objective = "reg:squarederror",
-  eta = 0.01,
-  max_depth = 4,
-  subsample = 0.8,
-  colsample_bytree = 0.8,
-  early_stopping_rounds = 50,
-  verbose = 0 # mute iterations
-)
-
-xgb_cv_raw_of$best_iteration
-
-# Train model
-params_raw_of <- list(
-  objective = "reg:squarederror",
-  eta = 0.01,
-  max_depth = 4,
-  subsample = 0.8,
-  colsample_bytree = 0.8
-)
-# Find best # of trees from cv
-best_xgb_raw_of <- xgb.train(
-  params = params_raw_of,
-  data = dtrain_raw,
-  nrounds = xgb_cv_raw_of$best_iteration 
-)
-```
-We can see that the XGBoost model performed best at 2000 trees according to cross-validation, with is hitting the max nrounds. 
-
-Checking to see if the model is overfitting (ZD, KB)
-```{r}
-# Overfitting?
-cv_rmse_raw_of <- min(xgb_cv_raw_of$evaluation_log$test_rmse_mean)
-train_rmse_raw_of <- min(xgb_cv_raw_of$evaluation_log$train_rmse_mean)
-
-data.frame(
-  Train_RMSE = train_rmse_raw_of,
-  CV_RMSE = cv_rmse_raw_of,
-  Test_RMSE = rmse_xgb_raw
-)
-```
-We can see that the model is strongly overfitting because the train error (92) is a lot lower than CV (163).
+We can see the untuned XGBoost model using raw features fits the training data almost perfectly (Train RMSE = 5.73, Train R2 = 1.0), but its performance drops substantially on the test set (Test RMSE = 163.04, Test R2 = 0.9976). This large gap between training and test errors indicates that the model is strongly overfitting: it memorizes the training data rather than learning patterns that generalize. While the test R2 is still very high, the absolute errors are large, suggesting predictions on new data would likely be unreliable.
 
 
 ## Introduce cross validation hyperparameter tuning (KB)
@@ -2169,7 +2136,7 @@ model_eval <- data.frame(
 knitr::kable(
   model_eval, 
   digits = 4, 
-  caption = "XGBoost Raw-Feature Model Best Hyperparameters - Overfitting Check (Train MAE & R2 included)"
+  caption = "XGBoost Raw-Feature Model Best Hyperparameters - Overfitting Check"
 )
 
 ```
@@ -2178,13 +2145,13 @@ knitr::kable(
 
 After tuning, our XGBoost model shows substantial improvement over the baseline, but some caution is still warranted regarding overfitting, so care should be taken when interpreting training performance metrics.
 
-We can see that the model is not overfitting severely, only to a reasonable extent (Train RMSE ≈ 56.54, Test RMSE ≈ 136.68). The gap between train and test performance is expected and much smaller than in the baseline model (Train RMSE ≈ 92.52, Test RMSE ≈ 163.04). This indicates that regularization and hyperparameter tuning have helped reduce the degree of overfitting.
+Although hyperparameter tuning substantially reduced test RMSE, the gap between training and test performance still remains large. This suggests that tuning improved overall predictive accuracy but did not fully eliminate overfitting, which is likely due to the small dataset. (Train RMSE ≈ 59.73, Test RMSE ≈ 151.72).
 
-We also can see that the cross-validation error is very similar to the test error (CV RMSE ≈ 164.67, Test RMSE ≈ 136.68). This is good because it means that the model is stable across folds, the cross-validation process is reliable, and the model is generalizing consistently. This also suggests there is no obvious data leakage.
+Cross-validation error is reasonably close to test error (CV RMSE ≈ 164.67, Test RMSE ≈ 151.72), which is encouraging. This indicates that the 5-fold CV is reliable, the model generalizes well, and there is no obvious data leakage.
 
-In addition, both R² scores show that the model fits the data extremely well (Train R² ≈ 0.9997, Test R² ≈ 0.9983). The almost perfect R² is likely due to the subgroup structure and engineered features, rather than overfitting.
+Both R2 values indicate excellent fit (Train R2 ≈ 0.9997, Test R2 ≈ 0.9979). The nearly perfect training R2 is likely a result of the raw features capturing much of the variability rather than overfitting.
 
-Overall, the tuned model clearly outperforms the baseline model. The baseline had a Test RMSE of about 163.04, whereas the tuned model achieves 136.68, which is a meaningful improvement in accuracy. This represents roughly a **16% reduction in test error**, showing that the tuning loop successfully improved generalization and stability.
+Overall, the tuned raw-feature XGBoost model outperforms the untuned baseline, reducing test RMSE from ~163.04 to ~151.72 (~7% reduction), improving predictive accuracy and stability. While training performance remains very strong, the model still shows some overfitting, likely due to the small dataset.
 
 
 Check for variable importance (ZD, KB)
@@ -2195,8 +2162,7 @@ print(importance)
 
 xgb.plot.importance(importance)
 ```
-(ADD HERE)
-
+We can see that subgroupslow and subgroupelite are the features the model relied on most to reduce prediction error. Variables like wind_speed or low_temp are less influential but still contribute a little. Features with extremely low Frequency are main_pollutantPM25, precipitation, and main_pollutantOzone, which are barely used by the model. 
 
 # Comparison of models (KB)
 ```{r}
@@ -2208,14 +2174,14 @@ comparison_table <- data.frame(
     "Test RMSE", "Test MAE", "Test R²"
   ),
   Raw_Feature_Model = c(
-    56.5368, 42.5066, 0.9997,
+    59.7257, 44.3783, 0.9997,
     164.6655,
-    136.6817, 101.9962, 0.9983
+    151.7229, 113.0459, 0.9979
   ),
   Engineered_Feature_Model = c(
-    49.2031, 36.1951, 0.9998,
+    45.8606, 33.3444, 0.9998,
     151.6136,
-    149.5008, 100.9366, 0.9982
+    138.3993, 91.0063, 0.9984
   )
 )
 
@@ -2228,14 +2194,175 @@ knitr::kable(
 
 ```
 
-After evaluating both the raw-feature and engineered-feature XGBoost models, we can see some clear differences in performance/stability.
+After evaluating both the raw-feature and engineered-feature XGBoost models, clear differences in performance and stability can be seen.
 
-The engineered-feature model has a lower training error (Train RMSE ≈ 49.20, Train MAE ≈ 36.20) and slightly better cross-validation performance (CV RMSE ≈ 151.61) compared to the raw-feature model (Train RMSE ≈ 56.54, Train MAE ≈ 42.51, CV RMSE ≈ 164.67). This means that the engineered features help the model fit the training data more accurately and generalize more consistently across folds.
+The engineered-feature model has a lower training error (Train RMSE ≈ 45.86, Train MAE ≈ 33.34) and better cross-validation performance (CV RMSE ≈ 151.61) compared to the raw-feature model (Train RMSE ≈ 59.73, Train MAE ≈ 44.38, CV RMSE ≈ 164.67). This indicates that the engineered features help the model fit the training data more accurately and generalize more consistently across folds.
 
-Interestingly, the raw-feature model shows slightly better test performance (Test RMSE ≈ 136.68, Test MAE ≈ 102.00) than the engineered-feature model (Test RMSE ≈ 149.50, Test MAE ≈ 100.94). However, its higher CV RMSE suggests that this improvement might be due to other things, possibly the variability in the specific train-test split. This makes it potentially less stable across different subsets of the data.
+The engineered-feature model also achieves better test performance (Test RMSE ≈ 138.40, Test MAE ≈ 91.01) than the raw-feature model (Test RMSE ≈ 151.72, Test MAE ≈ 113.05), demonstrating that feature engineering improves predictive accuracy and stability on unseen data.
 
-Both models have extremely high R2 on the training and test sets (≈0.998–0.999). This means that they are able to capture nearly all variability in the target. Overall, the engineered-feature model is recommended if stability and consistent generalization are priorities, while the raw-feature model may give slightly lower observed test error in this particular split but could be less reliable on new data.
+Both models achieve extremely high R2 values on training and test sets (≈0.998–0.999), showing that they capture nearly all variability in the target variable. Overall, the engineered-feature model is recommended, as it provides lower errors, better generalization, and more stable performance, while the raw-feature model performs worse across both CV and test metrics and may be less reliable on new data.
 
+
+# Test Berlin data on best model (KB, MH)
+We found that the best model was the engineered-feature XGBoost model. 
+
+## Apply same preprocessing and feature engineering on Berlin data (KB, MH)
+Make the Berlin data clean and feature engineered the same way as the main_data for the engineered-feature XGBoost model. 
+```{r}
+# Handling Missing Values (ZD, KB)
+missing_summary <- berlin_data %>%
+  summarise(across(everything(), ~sum(is.na(.))))
+
+# Keep only columns with at least one missing value
+missing_summary <- missing_summary %>%
+  select(where(~any(. > 0)))
+
+# Remove PM10 (KB)
+berlin_data  <- berlin_data  %>%
+  select(-pm10) 
+
+# KNN Imputation on PM2.5 using 5 nearest neighbors (KB)
+berlin_data <- kNN(berlin_data, variable = "pm25", k = 5) # can change later to see which K gives best model performance 
+
+# remove pm25_imp
+cols_to_remove <- c(
+  "pm25_imp"
+)
+
+berlin_data <- berlin_data[, !(names(berlin_data) %in% cols_to_remove)]
+
+#Convert categorical variables to factors (KB)
+berlin_data  <- berlin_data  %>%
+  mutate(subgroup = factor(subgroup),
+         gender = factor(gender),
+         marathon = factor(marathon),
+         main_pollutant = factor(main_pollutant))
+
+# Feature engineering (ZD, KB)
+berlin_data <- berlin_data %>%
+  mutate(
+    supershoe = factor(ifelse(year >= 2018, 1, 0), levels = c(0, 1)),
+    temp_aqi_interaction       = avg_temp * aqi,
+    avg_temp_gender_interaction = avg_temp * as.numeric(gender == "male")
+  )
+
+# Removing correlated variables  (KB)
+cols_to_remove <- c(
+  "high_temp",
+  "low_temp",
+  "aqi",
+  "main_pollutant" 
+)
+
+berlin_data <- berlin_data[, !(names(berlin_data) %in% cols_to_remove)]
+
+# Add Binned features based off Decision Tree (ozone_bin and pm25_bin) (KB)
+berlin_data$ozone_bin <- factor(ifelse(berlin_data$ozone >= 38, 1, 0), levels = c(0, 1))
+berlin_data$pm25_bin  <- factor(ifelse(berlin_data$pm25 >= 54, 1, 0), levels = c(0, 1))
+
+# Remove original ozone and pm25 from Berlin data so there isn't redundancy (KB)
+berlin_data <- berlin_data[, !(names(berlin_data) %in% c("ozone"))]
+berlin_data  <- berlin_data[, !(names(berlin_data) %in% c("pm25"))]
+
+```
+
+Align all factor variables in Berlin that were using in the train data so that the XGBoost model can process the data. (KB) 
+```{r}
+# Align marathon
+berlin_data$marathon <- factor(
+  berlin_data$marathon,
+  levels = levels(train_data$marathon)  # 3 levels from training 
+)
+
+# Align gender
+berlin_data$gender <- factor(
+  berlin_data$gender,
+  levels = levels(train_data$gender)
+)
+
+# Align subgroup
+berlin_data$subgroup <- factor(
+  berlin_data$subgroup,
+  levels = levels(train_data$subgroup)
+)
+
+# Align supershoe
+berlin_data$supershoe <- factor(
+  berlin_data$supershoe,
+  levels = levels(train_data$supershoe)
+)
+
+# Align ozone_bin
+berlin_data$ozone_bin <- factor(
+  berlin_data$ozone_bin,
+  levels = levels(train_data$ozone_bin)
+)
+
+# Align pm25_bin
+berlin_data$pm25_bin <- factor(
+  berlin_data$pm25_bin,
+  levels = levels(train_data$pm25_bin)
+)
+
+```
+
+## Build the XGBoost model for Berlin test data (KB)
+```{r}
+# Build model matrix using same formula as training
+berlin_matrix <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = berlin_data %>% select(-year, -n)
+)
+
+# Drop intercept column
+berlin_matrix <- berlin_matrix[, -1]
+
+
+# Align Berlin matrix columns with training matrix
+train_matrix <- model.matrix(
+  avg_chip_seconds ~ .,
+  data = train_data %>% select(-year, -n)
+)
+
+train_matrix <- train_matrix[, -1]
+
+# Keep only columns seen during training, in same order
+berlin_matrix <- berlin_matrix[, colnames(train_matrix), drop = FALSE]
+
+
+# Convert to DMatrix
+dberlin <- xgb.DMatrix(data = berlin_matrix)
+
+
+# Generate predictions
+pred_berlin <- predict(xgb_model, dberlin)
+
+
+# Evaluate Berlin performance
+
+rmse_berlin <- rmse(berlin_data$avg_chip_seconds, pred_berlin)
+mae_berlin  <- mae(berlin_data$avg_chip_seconds, pred_berlin)
+
+rss_berlin <- sum((berlin_data$avg_chip_seconds - pred_berlin)^2)
+tss_berlin <- sum((berlin_data$avg_chip_seconds - mean(berlin_data$avg_chip_seconds))^2)
+r2_berlin  <- 1 - rss_berlin / tss_berlin
+
+
+# Results
+berlin_eval <- data.frame(
+  Metric = c("RMSE", "MAE", "R²"),
+  Value  = c(rmse_berlin, mae_berlin, r2_berlin)
+)
+
+knitr::kable(
+  berlin_eval,
+  digits = 4,
+  caption = "XGBoost Engineered-Feature Model Performance on Berlin Test Data"
+)
+
+```
+
+(TRYING TO MAKE THIS WORK(KB))
 
 ------------------------
 # Inactive / Archived Code
