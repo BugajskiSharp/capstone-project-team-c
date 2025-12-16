@@ -2690,7 +2690,16 @@ train_data_clean <- train_data %>%
 berlin_data_clean <- berlin_data %>%
   select(-all_of(bad_cols))
 
+str(berlin_data_clean)
 ```
+
+
+```{r}
+str(train_data_clean)
+```
+
+
+
 
 Rebuild the training model matrix and retrain model (KB)
 
@@ -2699,10 +2708,22 @@ Factor levels for categorical predictors were explicitly aligned between the tra
 **NOTE:** Using train_matrix_clean as a template.
 ```{r}
 # Rebuild training model matrix
-train_matrix_clean <- model.matrix(
-  avg_chip_seconds ~ .,
-  data = train_data_clean %>% select(-year, -n)
-)[, -1]
+#train_matrix_clean <- model.matrix(
+#  avg_chip_seconds ~ .,
+#  data = train_data_clean %>% select(-year, -n)
+#)[, -1]
+
+
+train_matrix_clean <- train_data_clean %>%
+  select(-year, -n, -avg_chip_seconds) %>%
+  fastDummies::dummy_cols(
+    select_columns = c("subgroup","gender","supershoe","ozone_bin","pm25_bin"),
+    remove_first_dummy = FALSE,
+    remove_selected_columns = TRUE
+  ) %>%
+  mutate(across(everything(), ~ as.numeric(.))) %>%  # convert all columns to numeric
+  as.matrix()
+
 
 # Ensure colnames exist
 stopifnot(!is.null(colnames(train_matrix_clean)))
@@ -2717,7 +2738,7 @@ dtrain_clean <- xgb.DMatrix(
 set.seed(123)
 
 # Train model
-xgb_model <- xgb.train(
+xgb_model_berlin <- xgb.train(
   params = best_params, # from previous feature engineered XGBoost model
   data = dtrain_clean,
   nrounds = best_nrounds,
@@ -2778,25 +2799,38 @@ berlin_cc <- berlin_data_clean %>%
 
 Build Berlin model matrix (KB)
 ```{r}
-berlin_matrix <- model.matrix(
-  avg_chip_seconds ~ .,
-  data = berlin_cc
-)[, -1]
+#berlin_matrix <- model.matrix(
+#  avg_chip_seconds ~ .,
+#  data = berlin_cc
+#)[, -1]
+
+
+berlin_matrix_clean <- berlin_cc %>%
+  select(-avg_chip_seconds) %>%
+  fastDummies::dummy_cols(
+    select_columns = c("subgroup","gender","supershoe","ozone_bin","pm25_bin"),
+    remove_first_dummy = FALSE,
+    remove_selected_columns = TRUE
+  ) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  as.matrix()
+
+
 ```
 
 Align Berlin to training feature space (KB)
 ```{r}
 # Align Berlin columns to the training matrix
-berlin_matrix <- berlin_matrix[, colnames(train_matrix_clean), drop = FALSE]
+berlin_matrix_clean <- berlin_matrix_clean[, colnames(train_matrix_clean), drop = FALSE]
 
 # Sanity check
-stopifnot(identical(colnames(berlin_matrix), colnames(train_matrix_clean)))
+stopifnot(identical(colnames(berlin_matrix_clean), colnames(train_matrix_clean)))
 ```
 
 Predict and evaluate on Berlin data (KB)
 ```{r}
-dberlin <- xgb.DMatrix(data = berlin_matrix)
-pred_berlin <- predict(xgb_model, dberlin)
+dberlin <- xgb.DMatrix(data = berlin_matrix_clean)
+pred_berlin <- predict(xgb_model_berlin, dberlin)
 
 # Only use rows actually in berlin_matrix
 actual_berlin <- berlin_cc$avg_chip_seconds
@@ -3200,5 +3234,7 @@ ggplot(NYC, aes(x = "", y =avg_chip_seconds / 3600)) +
         axis.text.x  = element_blank(),
         axis.ticks.x = element_blank())
 ```
+  
+  
   
   
