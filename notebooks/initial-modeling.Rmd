@@ -3,7 +3,7 @@ title: "initialmodeling"
 date: "2025-11-23"
 output: html_document
 ---
-# Load libraries
+# Load libraries (KB, ZD, MH)
 ```{r}
 library(here)
 library(dplyr)
@@ -100,7 +100,7 @@ str(train_data)
 
 
 
-# LASSO is being used to answer the following question: (KB)
+# LASSO is being used to answer the following question: (KB, ZD)
 
 Which version of the air-quality and temperature features should we keep for the final model?
 ```{r}
