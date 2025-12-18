@@ -3459,5 +3459,7 @@ ggplot(NYC, aes(x = "", y =avg_chip_seconds / 3600)) +
 
   
   
-  
+#packageVersion("xgboost")
+#[1] ‘1.7.10.1’
+
   
