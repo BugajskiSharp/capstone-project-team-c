@@ -331,6 +331,7 @@ We can see that all the datasets were merged into one final_data successfully. W
 
 # EDA Tables and Graphing (KB, ZD, MH)
 
+# Create Table 1
 ## Table 1: Continuous Variable Summary (ZD)
 ```{r}
 # Select the continuous variables
@@ -347,6 +348,7 @@ continuous_summary <- final_data %>%
 continuous_summary
 ```
 
+# Create Table 2
 ## Table 2: Continuous variables summarized by subgroup and gender (ZD)
 ```{r}
 # Select continuous variables
@@ -388,6 +390,7 @@ continuous_summary_grouped <- final_data %>%
 continuous_summary_grouped
 ```
 
+# Create Table 3
 ## Table 3: Countinuous variables overall
 Select the continuous variables to make a clean table: (KB)
 ```{r}
@@ -465,6 +468,7 @@ The table above summarizes key descriptive statistics for continuous variables i
 All the variables show reasonable ranges and central values for weather and airquality conditions during the marathon events. We can see that chip times cluster around 4 hours (about 15,600 seconds) with moderate variability. Temperature measures (high, low, and average) fall within typical seasonal ranges, while air-quality variables such as ozone, pm10, pm2.5, and co show right-skewed distributions, indicating occasional higher pollution days. Visibility also shows strong right skew and high kurtosis, suggesting a few unusually high values compared with the rest of the data. Overall, most variables are moderately skewed, with some (like visibility and co) showing heavier tails.
 
 
+# Create a histogram for average finishing time
 ## Figure 1: Distribution of Average Finishing Times (ZD)
 ```{r}
 library(ggplot2) # load plotting library
@@ -489,8 +493,8 @@ ggplot(final_data, aes(x = avg_temp, y = avg_chip_seconds / 3600, color = marath
   )
 ```
 
-(ZD)
-## Figure 3: Overview of the Relationship Between Air Quality and Finishing Time by Marathon
+
+## Figure 3: Overview of the Relationship Between Air Quality and Finishing Time by Marathon (ZD)
 ```{r}
 
 ggplot(final_data, aes(x = aqi, y = avg_chip_seconds / 3600, color = marathon)) +
@@ -1320,7 +1324,7 @@ str(test_data)
 We can see that ozone and pm25 were successfully removed from both datasets and we now have the binned features.
 
 
-Attempt for XGboost model containing the engineered features, binned features, and scaled features: (ZD)
+Create XGboost model containing the engineered features, binned features, and scaled features: (ZD)
 ```{r}
 # Remove identifiers before creating model matrix
 #Convert dataset to numeric-only matrix
@@ -2195,7 +2199,7 @@ SHAP values to left of 0 (negative) represent decreases in predicted finishing t
 
 Marathon location proves to be important in determining race results. Elite runners strongly decreased in predicted finishing time, while slow runners strongly increased in predicted finishing time. Temperature, ozone, dew point, and PM2.5 influence finishing time but their effects are limited compared to the subgrouping impacts.
 
-#Investigate interactions between environmental features and subgroups/genders(ZD/MH)
+#Investigate interactions between environmental features and subgroups/genders (ZD/MH)
 
 ```{r}
 # PM2.5 effect by subgroup
@@ -2314,7 +2318,7 @@ ggplot(gender_points, aes(x = x_feature, y = value, color = color_value)) +
 ```
 This figure shows the comparison of avg temp by gender. Females see greater improvement as temperatures warm up to between 45 and 50 degrees and then begin to slow down, where as men are more consistent until about 65 degrees before they begin to slow down. This suggests that when we're looking at temperature alone. Men are slightly more resistent to performance declines. 
 
-
+(ZD/MH)
 ```{r}
 
 #plot for elite subgroup
@@ -2421,7 +2425,7 @@ slow_points <- slow$data
 
 
 
-#subset so each dataset hase color_value = 1 (the dataframe's positive subroup)
+#subset so each dataset has color_value = 1 (the dataframe's positive subroup)
 elite_points <- subset(elite_points, color_value == 1)
 comp_points <- subset(comp_points, color_value == 1)
 rec_points <- subset(rec_points, color_value == 1)
@@ -2561,7 +2565,7 @@ slow_points <- slow$data
 
 
 
-#subset so each dataset hase color_value = 1 (the dataframe's positive subroup)
+#subset so each dataset has color_value = 1 (the dataframe's positive subroup)
 elite_points <- subset(elite_points, color_value == 1)
 comp_points <- subset(comp_points, color_value == 1)
 rec_points <- subset(rec_points, color_value == 1)
