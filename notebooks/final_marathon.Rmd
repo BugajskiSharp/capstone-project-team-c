@@ -477,7 +477,7 @@ ggplot(final_data, aes(x = avg_chip_seconds / 3600)) + # convert from seconds to
     y = "Frequency"
   )
 ```
-
+The figure above displays the overall distribution of average finishing times among all runners in all races via a histogram. The distribution is right-skewed, where a large portion of runners are clustered between the 3 and 4-hour mark. We can see that there are fewer runners with longer times (slow/recreational runners), extending the tail of the distribution. A strong majority of the runners have finishing times between the 3 and 4 hour mark.
 
 ## Figure 2: Overview of the Effect of Avg Temperature on Finishing Time by Marathon (ZD)
 ```{r}
@@ -490,7 +490,7 @@ ggplot(final_data, aes(x = avg_temp, y = avg_chip_seconds / 3600, color = marath
     y = "Finishing Time (hours)"
   )
 ```
-
+The scatterplots above show the effect of average temperature on the average finishing time by each individual marathon. Each marathon has its own scatterplot, with its own temperature scale on the x-axis and finishing time on the y-axis. The black lines represent fitted regression trend lines that show how the average finishing time changes alongside temperature. Runners are represented by the points on the scatterplot. All four of the trend lines have a slight upward slope, which indicates that as the temperature increases, the average finishing times tend to become slower as runners take longer to complete the race. From this, we can gather that higher temperatures likely increase the risk of dehydration and fatigue amongst runners, causing runners to slow down.
 
 ## Figure 3: Overview of the Relationship Between Air Quality and Finishing Time by Marathon (ZD)
 ```{r}
@@ -505,7 +505,7 @@ ggplot(final_data, aes(x = aqi, y = avg_chip_seconds / 3600, color = marathon)) 
   ) +
   theme(legend.position = "none")
 ```
-
+The scatterplots above show the relationship between air quality and the average finishing time by marathon. For Berlin, the AQI values are low, with the majority of data points within an AQI value of 40. The AQI values are low most likely because of the missing PM2.5 which is a driver for higher AQI. There appears a slight positive relationship between finishing time increasing and increased AQI for Boston and Chicago. NYC and Berlin appear slightly more flat suggesting limited or not relationship.
 
 ## Figure 4: Correlation Matrix (MH)
 ```{r}
@@ -737,6 +737,7 @@ str(main_data)
 We can see that the identifiers (subgroup, gender, marathon) and predictor (main_pollutant) were all converted to factors so that our models can properly recognized them. 
 
 ## Feature engineering (ZD, KB)
+We next created several interaction terms to try and capture potential combined effects of environmental and demographic factors on marathon performance.  In addition, we added a control for the introduction of “supershoes,” coded as 1 for marathons in 2018 and later, when these performance-enhancing shoes became widely used, and 0 otherwise.
 ```{r}
 # create interaction terms and convert supershoe to factor
 main_data_fe <- main_data %>%
@@ -756,9 +757,9 @@ str(main_data_fe)
 ```
 
 ## Correlation Check (KB)
-Need to do a Quick correlation check for numeric variables and see what features inroduce multicollinearity.
+Need to do a Quick correlation check for numeric variables and see what features introduce multicollinearity (includinf the new engineered features).
 ```{r}
-# Find numeric columns after feature engineering, excluding 'year' and 'n' since they are idenifiers
+# Find numeric columns after feature engineering, excluding 'year' and 'n' since they are identifiers
 numeric_vars <- main_data_fe %>%
   select(where(is.numeric)) %>%
   select(-year, -n) %>% 
@@ -823,7 +824,7 @@ Now we have a dataset that has 770 obs. and only 19 variables after the addition
 # Feature Selection Using Supervised Models (KB, MH, ZD)
 
 ## Decision Trees (KB, MH)
-Using the final merged dataset before feature engineering. There is no gender interaction for the sake of feature engineering investigation. 
+The following uses the final merged dataset before any feature engineering. There is no gender interaction for the sake of feature engineering (binning) investigation. 
 ```{r}
 #(KB from merging and pre-feat-eng)
 
@@ -948,7 +949,7 @@ train_data_tree$temp_aqi_bin <- ifelse(train_data_tree$temp_aqi_interaction >= 2
 
 ```
 
-Comparing models with continuous and binned data (TRAIN ONLY) (KB, MH)
+Comparing models with continuous and binned data to determine which featires should be binned or left continuous (TRAIN ONLY) (KB, MH)
 ```{r}
 # continuous-only model
 model_cont <- lm(avg_chip_seconds ~ avg_temp + ozone + pm25 + wind_speed + temp_aqi_interaction,
