@@ -49,11 +49,14 @@ This project uses the **renv** package to ensure a reproducible R environment.
 1. Clone the repository
 2. Open the project - Open `capstone-project-team-c.Rproj` in RStudio (this sets the project root)
 3. Restore the project’s R package environment:
-        ```install.packages("renv")  # if not already installed
-        renv::restore()```
-4. Open the `notebooks` folder
-5. Select `final-marathon.Rmd`
-6. Knit or run the .Rmd to reproduce the analysis.
+   
+```install.packages("renv")  # if not already installed
+
+renv::restore()```
+   
+5. Open the `notebooks` folder
+6. Select `final-marathon.Rmd`
+7. Knit or run the .Rmd to reproduce the analysis.
 
 ## Team Members
 - Krisha Bugajski-Sharp
