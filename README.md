@@ -30,12 +30,18 @@ Can weather and environmental factors—such as temperature, wind speed, precipi
 - `capstone-project-team-c.Rproj`: The RStudio Project file. Opening this file sets the project root
 - `README.md`: project overview 
 
+## Custom Functions
+There are two custom functions written and executed within the repo `final_marathon.rmd`:
+- `clean_chip_time`: cleans and standardizes chip-time values
+- `evaluate`: creates a list based on inputted model returning RMSE, MAE, R1, preds, and actual that are used for evaluation and graphing of linear model
+
 ## How to Run
 1. Clone the repository
 2. Open the project - Open `capstone-project-team-c.Rproj` in RStudio (sets the project root)
 3. Open the `notebooks` folder and select an .Rmd
 3. Install any required packages (once per machine)
-4. Run the .Rmd
+4. Ensure packages align with `renv.lock`
+5. Run the .Rmd
 
 ## Team Members
 - Krisha Bugajski-Sharp
