@@ -1,6 +1,6 @@
 ---
 title: "Predicting Marathon Average Finishing Times: *The Impact of Weather and Air Quality on Marathons*"
-author: "**By:** Krisha Bugajski-Sharp (KB), Zachary D’Urso (ZD), Meghan Holden (HM)"
+author: "**By:** Krisha Bugajski-Sharp (KB), Zachary D’Urso (ZD), Meghan Holden (MH)"
 date: "**Date:** 12-19-2025"
 output:
   html_document:
