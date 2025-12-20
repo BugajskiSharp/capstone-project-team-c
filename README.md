@@ -14,7 +14,7 @@ Understanding these patterns can help:
 
 
 ## Research Question: 
-Can weather and environmental factors—such as temperature, wind speed, precipitation, dew point, visibility, sea level pressure, and air quality—predict average marathon finishing times across different performance groups (elite, competitive, average, and slow runners) and genders? 
+Can weather and environmental factors—such as temperature, wind speed, precipitation, dew point, visibility, sea level pressure, and air quality—predict average marathon finishing times across different performance groups (elite, competitive, intermediate, recreational and slow runners) and genders? 
 
 ## Hypothesis & Predictions
  
